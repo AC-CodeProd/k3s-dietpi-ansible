@@ -1,0 +1,203 @@
+---
+- name: Test for raspberry pi /proc/cpuinfo
+  ansible.builtin.command: grep -E "Raspberry Pi|BCM2708|BCM2709|BCM2835|BCM2836" /proc/cpuinfo
+  register: grep_cpuinfo_raspberrypi
+  failed_when: false
+  changed_when: false
+
+- import_tasks: network.yml
+
+- import_tasks: unlock_apt.yml
+  when: unlock_apt | default(false)
+
+- name: Update apt repo and cache
+  apt:
+    update_cache: true
+    force_apt_get: true
+    cache_valid_time: 3600
+
+- name: Run 'apt list --upgradable -a' to see them.
+  command: "apt list --upgradable -a"
+  become: true
+
+- name: Apt-get upgrade
+  apt:
+    upgrade: full
+    update_cache: yes
+    cache_valid_time: 3600
+    force_apt_get: true
+    autoclean: yes
+    autoremove: yes
+  become: true
+  register: apt_upgrade
+  retries: 5
+  until: apt_upgrade is success
+
+- name: Install dependent packages
+  apt:
+    name: "{{ packages }}"
+    install_recommends: false
+    update_cache: true
+    cache_valid_time: 3600
+    force_apt_get: true
+    autoclean: true
+    autoremove: true
+  register: apt_install
+  retries: 5
+  until: apt_install is success
+  ignore_errors: "{{ ansible_check_mode }}"
+
+- name: Disable swap on all systems
+  block:
+    - name: Turn off swap
+      command: swapoff -a
+    
+    - name: Remove swap from fstab
+      replace:
+        path: /etc/fstab
+        regexp: '^([^#].*swap.*)$'
+        replace: '# \1'
+        backup: true
+    
+    - name: Set swappiness to 0
+      sysctl:
+        name: vm.swappiness
+        value: "0"
+        state: present
+        reload: true
+    
+    - name: Try to disable dphys-swapfile if present
+      shell: |
+        if [ -f /etc/dphys-swapfile ]; then
+          sed -i 's/^CONF_SWAPSIZE=.*/CONF_SWAPSIZE=0/' /etc/dphys-swapfile
+          systemctl stop dphys-swapfile 2>/dev/null || true
+          systemctl disable dphys-swapfile 2>/dev/null || true
+        fi
+      ignore_errors: true
+  rescue:
+    - name: Emergency disable
+      shell: |
+        swapoff -a || true
+        echo "vm.swappiness=0" >> /etc/sysctl.conf
+      ignore_errors: true
+  always:
+    - name: Final check
+      debug:
+        msg: "Swap status: {{ 'Disabled' if ansible_swaptotal_mb == 0 else 'May still be active' }}"
+
+- name: Show cpuinfo
+  debug:
+    msg: "{{ grep_cpuinfo_raspberrypi.stdout }}"
+
+- name: Check if /boot/firmware/cmdline.txt exists
+  ansible.builtin.stat:
+    path: /boot/firmware/cmdline.txt
+  register: boot_firmware_cmdline_txt
+
+- name: Edit cmdline.txt configuration
+  block:
+    - name: Enable options via boot cmdline if not already enabled
+      ansible.builtin.replace:
+        path: "{{ (boot_firmware_cmdline_txt.stat.exists) | ternary('/boot/firmware/cmdline.txt', '/boot/cmdline.txt') }}"
+        regexp: '^([\w](?!.*\b{{ item }}\b).*)$'
+        replace: '\1 {{ item }}'
+      with_items:
+        - "cgroup_enable=cpuset"
+        - "cgroup_memory=1"
+        - "cgroup_enable=memory"
+        - "apparmor=1"
+        - "security=apparmor"
+      loop_control:
+        loop_var: item
+      register: _restarting_host
+
+    - import_tasks: reboot.yml
+      when: (bastion_group | default('loadbalancer')) not in group_names
+
+    - import_tasks: reboot.yml
+      when: (bastion_group | default('loadbalancer')) in group_names
+
+- name: Enable ipv4 forwarding
+  ansible.posix.sysctl:
+    name: net.ipv4.ip_forward
+    value: "1"
+    state: present
+    reload: true
+
+- name: Enable ipv6 forwarding
+  ansible.posix.sysctl:
+    name: net.ipv6.conf.all.forwarding
+    value: "1"
+    state: present
+    reload: true
+  when: ansible_all_ipv6_addresses | length > 0
+
+- name: Backup /etc/hosts
+  copy:
+    remote_src: yes
+    src: /etc/hosts
+    dest: /etc/hosts.{{ ansible_date_time.epoch }}
+
+- name: Update /etc/hosts
+  template:
+    src: templates/hosts.j2
+    dest: /etc/hosts
+
+- name: Check for apparmor existence
+  ansible.builtin.stat:
+    path: /sys/module/apparmor/parameters/enabled
+  register: apparmor_enabled
+
+- name: Check if apparmor is enabled
+  when: apparmor_enabled.stat.exists
+  ansible.builtin.command: cat /sys/module/apparmor/parameters/enabled
+  register: apparmor_status
+  changed_when: false
+
+- name: Install apparmor parser
+  when:
+    - apparmor_status is defined
+    - apparmor_status.stdout == "Y"
+  ansible.builtin.package:
+    name: apparmor
+    state: present
+
+- name: Install open-iscsi packages
+  apt:
+    name: open-iscsi
+    install_recommends: false
+    update_cache: true
+    force_apt_get: true
+  register: apt_install_iscsi
+  retries: 5
+  until: apt_install_iscsi is success
+
+- name: Restart iscsid
+  systemd:
+    name: iscsid
+    enabled: true
+    state: restarted
+    daemon_reload: true
+
+- name: Setup iscsi modules to load on reboot
+  copy:
+    content: '{{ item }}'
+    dest: '/etc/modules-load.d/{{ item }}.conf'
+    owner: root
+    group: root
+    mode: '0644'
+  loop:
+  - iscsi_tcp
+
+- name: Load iscsi_tcp module
+  modprobe:
+    name: '{{ item }}'
+    state: present
+  loop:
+  - iscsi_tcp
+
+- name: Gather the package facts
+  ansible.builtin.package_facts:
+    manager: auto
+
+

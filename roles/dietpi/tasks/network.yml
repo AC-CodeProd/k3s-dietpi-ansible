@@ -1,0 +1,56 @@
+---
+- name: Configure iptables
+  iptables:
+    table: "{{ item['table']|default(omit) }}"
+    chain: "{{ item['chain']|default(omit) }}"
+    ctstate: "{{ item['ctstate']|default(omit) }}"
+    source: "{{ item['source']|default(omit) }}"
+    destination: "{{ item['destination']|default(omit) }}"
+    in_interface: "{{ item['in_interface']|default(omit) }}"
+    out_interface: "{{ item['out_interface']|default(omit) }}"
+    jump: "{{ item['jump']|default(omit) }}"
+    state: "{{ item['state']|default(omit) }}"
+  register: _iptables_configured
+  with_items: "{{ jumphost_iptables_rules }}"
+  when: (bastion_group | default('loadbalancer')) in group_names
+
+- name: Save iptables rules netfilter-persistent
+  command: service netfilter-persistent save
+  when:
+    - _iptables_configured['changed']
+    - (bastion_group | default('loadbalancer')) in group_names
+
+- name: Save iptables rules
+  command: iptables-save -f /etc/iptables/rules.v4
+  when:
+    - _iptables_configured['changed']
+    - (bastion_group | default('loadbalancer')) in group_names
+
+- name: Backup original interfaces file
+  copy:
+    src: /etc/network/interfaces
+    dest: /etc/network/interfaces.bak
+    remote_src: yes
+    backup: yes
+
+- name: Remove old IPv6 static block for {{ rpi_iface_name }}
+  blockinfile:
+    path: /etc/network/interfaces
+    marker: "# {mark} ANSIBLE MANAGED IPv6 for {{ rpi_iface_name }}"
+    state: absent
+
+- name: Add/replace static IPv6 config for {{ rpi_iface_name }}
+  blockinfile:
+    path: /etc/network/interfaces
+    marker: "# {mark} ANSIBLE MANAGED IPv6 for {{ rpi_iface_name }}"
+    block: |
+      iface {{ rpi_iface_name }} inet6 static
+          address {{ hostvars[inventory_hostname]['hosts'][inventory_hostname].ipv6 }}
+          netmask {{ rpi_ipv6_netmask }}
+          gateway {{ rpi_ipv6_gateway }}
+
+- import_tasks: reboot.yml
+  when: (bastion_group | default('loadbalancer')) not in group_names
+
+- import_tasks: reboot.yml
+  when: (bastion_group | default('loadbalancer')) in group_names

@@ -1,0 +1,9 @@
+---
+swapfile_config: /etc/dphys-swapfile
+packages:
+  - iptables
+  - iptables-persistent
+  - netfilter-persistent
+  - apparmor
+  - apparmor-utils
+  - vim

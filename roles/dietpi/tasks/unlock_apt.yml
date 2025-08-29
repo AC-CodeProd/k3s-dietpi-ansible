@@ -1,0 +1,36 @@
+---
+- name: Check for running apt or dpkg processes
+  shell: pgrep -fa 'apt|dpkg' | grep -v ansible || true
+  register: apt_processes
+  changed_when: false
+
+- name: Show currently running apt/dpkg processes (debug)
+  debug:
+    msg: "{{ apt_processes.stdout_lines }}"
+
+- name: Fail if apt/dpkg process is running
+  fail:
+    msg: >
+      There are running apt/dpkg processes: {{ apt_processes.stdout_lines }}.
+      Wait for them to finish or kill them manually before running this playbook.
+  when: apt_processes.stdout != ""
+
+- name: Remove apt and dpkg lock files (only if no process running)
+  file:
+    path: "{{ item }}"
+    state: absent
+  loop:
+    - /var/lib/apt/lists/lock
+    - /var/cache/apt/archives/lock
+    - /var/lib/dpkg/lock
+    - /var/lib/dpkg/lock-frontend
+  when: apt_processes.stdout == ""
+
+- name: Fix dpkg interrupted state (recommended if locks were present)
+  shell: dpkg --configure -a
+  when: apt_processes.stdout == ""
+
+- name: Update apt cache to ensure apt works again
+  apt:
+    update_cache: yes
+  when: apt_processes.stdout == ""

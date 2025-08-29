@@ -1,0 +1,102 @@
+---
+- name: Start setup calico
+  when:
+    - inventory_hostname == groups['servers'][0]
+  block:
+    - name: Apply operator-crds
+      command:
+        cmd: kubectl create -f https://raw.githubusercontent.com/projectcalico/calico/v3.30.2/manifests/operator-crds.yaml
+    
+    - name: Apply tigera-operator
+      command:
+        cmd: kubectl create -f https://raw.githubusercontent.com/projectcalico/calico/v3.30.2/manifests/tigera-operator.yaml
+    
+    - name: Download calico custom resources
+      get_url: 
+        url: "https://raw.githubusercontent.com/projectcalico/calico/v3.30.2/manifests/custom-resources.yaml"
+        dest: /tmp/calico-custom-resources.yaml
+    
+    - name: Insert containerIPForwarding calico custom resources
+      ansible.builtin.shell: |
+        FILE="{{ path }}"
+        SEARCH="{{ item.after }}"
+        KEY="{{ item.key }}"
+        VALUE="{{ item.value }}"
+
+        SEARCH_ESCAPED=$(printf '%s\n' "$SEARCH" | sed 's/[\/&]/\\&/g')
+
+        INDENT=$(grep -F "$SEARCH" "$FILE" | sed -E 's/[^ ].*//')
+
+        if ! grep -qE "^[ ]*${KEY}:" "$FILE"; then
+          sed -i "/$SEARCH_ESCAPED/a\\
+        ${INDENT}  ${KEY}: ${VALUE}" "$FILE"
+        fi
+      args:
+        executable: /bin/bash
+      loop:
+        - key: "containerIPForwarding"
+          value: "Enabled"
+          after: "calicoNetwork:"
+      vars:
+        path: "/tmp/calico-custom-resources.yaml"
+        
+    - name: Escape CIDR for sed
+      when: inventory_hostname == groups['servers'][0]
+      set_fact:
+        cluster_cidr_escaped: "{{ cluster_cidr | regex_replace('\\.', '\\\\.') | regex_replace('/', '\\\\/') }}"
+        cluster_cidr_escaped_ipv6: "{{ cluster_cidr_ipv6 | regex_replace('\\.', '\\\\.') | regex_replace('/', '\\\\/') }}"
+
+    - name: Replace 192.168.0.0/16 to {{cluster_cidr_escaped}}
+      when: inventory_hostname == groups['servers'][0]
+      command:
+        cmd: sed 's/192\.168\.0\.0\/16/{{cluster_cidr_escaped}}/' -i /tmp/calico-custom-resources.yaml
+
+    - name: Add IPv6 ipPool
+      ansible.builtin.replace:
+        path: "/tmp/calico-custom-resources.yaml"
+        regexp: '^(\s*ipPools:\s*)$'
+        replace: |
+          \1
+              - name: default-ipv6-ippool
+                blockSize: 122
+                cidr: {{ cluster_cidr_ipv6 }}
+                encapsulation: None
+                natOutgoing: Enabled
+                nodeSelector: all()
+
+    - name: Apply calico custom resources
+      command:
+        cmd: kubectl apply -f /tmp/calico-custom-resources.yaml
+        
+- name: Download calicoctl binary
+  ansible.builtin.get_url:
+    url: https://github.com/projectcalico/calico/releases/download/v3.30.2/calicoctl-linux-arm64
+    dest: /usr/local/bin/calicoctl
+    mode: '0755'
+    force: true
+  become: true
+
+- name: Setup calico additional configuration
+  when:
+    - inventory_hostname == groups['servers'][0]
+  block:
+    - name: Apply default BGPConfiguration and IPPool
+      ansible.builtin.shell: |
+        calicoctl apply -f - <<EOF
+        ---
+        apiVersion: projectcalico.org/v3
+        kind: IPPool
+        metadata:
+          name: ippool-service
+        spec:
+          allowedUses:
+            - Workload
+            - Tunnel
+          assignmentMode: Automatic
+          blockSize: 26
+          cidr: 10.43.0.0/16
+          ipipMode: Never
+          natOutgoing: true
+          nodeSelector: all()
+          vxlanMode: Never
+        EOF

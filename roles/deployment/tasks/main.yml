@@ -1,0 +1,22 @@
+---
+
+- name: Check if helm is installed
+  ansible.builtin.command:
+    cmd: helm version --short
+  register: helm_version
+  ignore_errors: true
+  changed_when: false
+  failed_when: helm_version.rc != 0
+
+- name: Check if server is first
+  ansible.builtin.set_fact:
+    is_server: "{{ inventory_hostname == groups['servers'][0] }}"
+
+- name: Run deployment
+  when: is_server
+  block:
+    - import_tasks: purelb.yml
+      tags: purelb
+
+    - import_tasks: traefik.yml
+      tags: traefik

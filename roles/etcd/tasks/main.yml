@@ -1,0 +1,62 @@
+---
+- name: Set etcd version and arch
+  set_fact:
+    etcd_version: "v3.6.2"
+    etcd_arch: "arm64"
+    etcd_install_dir: "/usr/local/bin"
+
+- name: Create download dir
+  file:
+    path: /tmp/etcd-download
+    state: directory
+
+- name: Download etcd
+  get_url:
+    url: "https://github.com/etcd-io/etcd/releases/download/{{ etcd_version }}/etcd-{{ etcd_version }}-linux-{{ etcd_arch }}.tar.gz"
+    dest: "/tmp/etcd.tar.gz"
+
+- name: Extract etcd binaries
+  unarchive:
+    src: /tmp/etcd.tar.gz
+    dest: /tmp/etcd-download
+    remote_src: yes
+    extra_opts: ["--strip-components=1"]
+
+- name: Copy etcd and etcdctl to /usr/local/bin
+  copy:
+    src: "{{ item }}"
+    dest: "{{ etcd_install_dir }}/"
+    mode: '0755'
+    remote_src: yes
+  loop:
+    - "/tmp/etcd-download/etcd"
+    - "/tmp/etcd-download/etcdctl"
+
+- name: Create etcd data dir
+  file:
+    path: /var/lib/etcd
+    state: directory
+    owner: root
+    group: root
+    mode: '0700'
+
+- import_tasks: tls.yml
+  when: inventory_hostname == groups['loadbalancers'][0]
+
+- name: Deploy etcd systemd service
+  template:
+    src: etcd.service.j2
+    dest: /etc/systemd/system/etcd.service
+
+- name: Restart etcd
+  systemd:
+    name: etcd
+    state: restarted
+    daemon_reload: true
+
+- name: Enable and start etcd
+  systemd:
+    name: etcd
+    enabled: true
+    state: started
+    daemon_reload: true

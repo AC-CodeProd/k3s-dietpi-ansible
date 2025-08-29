@@ -1,0 +1,2 @@
+---
+haproxy_port: "{{ k3s_api_port | default(6443) }}"

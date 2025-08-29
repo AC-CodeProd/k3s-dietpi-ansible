@@ -1,0 +1,106 @@
+---
+
+- name: Download longhorn manifest
+  get_url: 
+    url: "https://raw.githubusercontent.com/longhorn/longhorn/v1.9.1/deploy/longhorn.yaml"
+    dest: /tmp/longhorn.yaml
+  when: inventory_hostname == groups['servers'][0]
+
+- name: Configure longhorn default settings
+  when: inventory_hostname == groups['servers'][0]
+  ansible.builtin.shell: |
+    FILE="{{ path }}"
+    SEARCH="{{ item.after }}"
+    KEY="{{ item.key }}"
+    VALUE="{{ item.value }}"
+    CHECK_VALUE="{{ item.value | lower }}"
+
+    if [[ "$CHECK_VALUE" =~ ^[0-9]+$ || "$CHECK_VALUE" =~ ^[0-9]+\.[0-9]+$ ]]; then
+      TMP_VALUE="$VALUE"
+    elif [[ "$CHECK_VALUE" == "true" || "$CHECK_VALUE" == "false" ]]; then
+      TMP_VALUE="$CHECK_VALUE"
+    else
+      TMP_VALUE="\"$VALUE\""
+    fi
+
+    SEARCH_ESCAPED=$(printf '%s\n' "$SEARCH" | sed 's/[\/&]/\\&/g')
+    VALUE_ESCAPED=$(printf '%s\n' "$TMP_VALUE" | sed 's/[\/&]/\\&/g')
+
+    INDENT=$(grep -F "$SEARCH" "$FILE" | sed -E 's/[^ ].*//')
+
+    if ! grep -qE "^[ ]*${KEY}:" "$FILE"; then
+      sed -i "/$SEARCH_ESCAPED/a\\
+    ${INDENT}  ${KEY}: ${VALUE_ESCAPED}" "$FILE"
+    fi
+  args:
+    executable: /bin/bash
+  loop:
+    - key: "backup-target"
+      value: "{{longhorn_backup_target}}"
+      after: "default-resource.yaml: |-"
+    - key: "default-data-path"
+      value: "/var/lib/longhorn"
+      after: "default-setting.yaml: |-"
+  vars:
+    path: "/tmp/longhorn.yaml"
+
+- name: Deploy longhorn storage
+  when: inventory_hostname == groups['servers'][0]
+  command:
+    cmd: kubectl apply -f /tmp/longhorn.yaml
+
+- name: Wait for longhorn pods to be ready
+  when: inventory_hostname == groups['servers'][0]
+  ansible.builtin.command:
+      cmd: kubectl wait --for=condition=Ready pod --all -n longhorn-system  --timeout=300s
+  register: longhorn_ready
+  until: longhorn_ready.rc == 0
+  retries: 30
+  delay: 10
+
+- name: Show longhorn pods status
+  when: 
+    - longhorn_ready is defined and longhorn_ready.stdout_lines is defined
+    - inventory_hostname == groups['servers'][0]
+  ansible.builtin.debug:
+    msg: "{{ longhorn_ready.stdout_lines }}"
+
+- name: Check if local-path manifest exists
+  ansible.builtin.stat:
+    path: /var/lib/rancher/k3s/server/manifests/local-storage.yaml
+  register: lp_manifest
+
+- name: Block — disable manifest and adjust StorageClasses
+  when: lp_manifest.stat.exists
+  block:
+    - name: Disable local-path manifest (rename -> .skip) on each node
+      ansible.builtin.shell: |
+        mv /var/lib/rancher/k3s/server/manifests/local-storage.yaml /var/lib/rancher/k3s/server/manifests/local-storage.yaml.skip
+    - name: Block — patch StorageClasses once (on the first server)
+      when: inventory_hostname == groups['servers'][0]
+      run_once: true
+      block:
+        - name: Remove default flag from local-path storage class
+          ansible.builtin.shell: |
+            kubectl patch storageclass local-path -p '{"metadata": {"annotations":{"storageclass.kubernetes.io/is-default-class":"false"}}}'
+        - name: Set longhorn as default storage class
+          ansible.builtin.shell: |
+            kubectl patch storageclass longhorn -p '{"metadata": {"annotations":{"storageclass.kubernetes.io/is-default-class":"true"}}}'
+    - name: Restart k3s service
+      ansible.builtin.systemd:
+        name: k3s
+        state: restarted
+        enabled: true
+        daemon_reload: true
+    - name: Wait for all nodes to be Ready
+      ansible.builtin.shell: >
+        kubectl get nodes -o jsonpath='{range .items[*]}
+        {range .status.conditions[?(@.type=="Ready")]}{.status}{"\n"}{end}{end}' |
+        grep -c '^True$'
+      register: ready_nodes
+      changed_when: false
+      retries: 60
+      delay: 5
+      until: (ready_nodes.stdout | int) >= (3 | int)
+      run_once: true
+      when: inventory_hostname == groups['servers'][0]

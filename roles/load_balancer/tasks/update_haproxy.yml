@@ -1,0 +1,10 @@
+---
+- name: Generate haproxy config file
+  vars:
+    servers: "{{ groups['servers'] }}"
+  template:
+    src: haproxy.cfg.j2
+    dest: /etc/haproxy/haproxy.cfg
+    mode: 0644
+  notify: restart haproxy
+  tags: update_haproxy

@@ -1,0 +1,15 @@
+---
+- name: Download helm 3 install script
+  ansible.builtin.get_url:
+    url: https://raw.githubusercontent.com/helm/helm/main/scripts/get-helm-3
+    timeout: 120
+    dest: /tmp/get_helm.sh
+    owner: root
+    group: root
+    mode: "0700"
+
+- name: Run helm 3 install script
+  ansible.builtin.command:
+    cmd: /tmp/get_helm.sh
+
+

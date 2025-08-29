@@ -1,0 +1,53 @@
+global
+    log /dev/log	local0
+    log /dev/log	local1 notice
+    chroot /var/lib/haproxy
+    stats socket /run/haproxy/admin.sock mode 660 level admin expose-fd listeners
+    stats timeout 30s
+    user haproxy
+    group haproxy
+    daemon
+
+defaults
+    log	global
+    mode	http
+    option	httplog
+    option	dontlognull
+        timeout connect 5000
+        timeout client  50000
+        timeout server  50000
+    errorfile 400 /etc/haproxy/errors/400.http
+    errorfile 403 /etc/haproxy/errors/403.http
+    errorfile 408 /etc/haproxy/errors/408.http
+    errorfile 500 /etc/haproxy/errors/500.http
+    errorfile 502 /etc/haproxy/errors/502.http
+    errorfile 503 /etc/haproxy/errors/503.http
+    errorfile 504 /etc/haproxy/errors/504.http
+
+frontend k3s-frontend
+    bind {{ keepalived_vip }}:8443
+    bind 0.0.0.0:8443
+    bind 127.0.0.1:8443
+    mode tcp
+    option tcplog
+    timeout client 4h
+    default_backend k3s-backend
+    option forwardfor
+
+backend k3s-backend
+    mode tcp
+    option tcp-check
+    timeout connect 10s
+    timeout server 4h
+    balance roundrobin
+    default-server inter 10s downinter 5s rise 2 fall 2 slowstart 60s maxconn 250 maxqueue 256 weight 100
+{% for host in servers %}
+    server {{ hostvars[host]['ansible_hostname'] }} {{ hostvars[host]['hosts'][host].ip }}:6443 check
+{% endfor %}
+
+frontend stats
+    bind *:8404
+    stats enable
+    stats uri /stats
+    stats refresh 10s
+    stats auth admin:admin

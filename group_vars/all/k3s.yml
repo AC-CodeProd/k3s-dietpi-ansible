@@ -1,0 +1,17 @@
+---
+k3s_version: "{{ k3s_version }}"
+k3s_server_location: "/var/lib/rancher/k3s"
+k3s_kubeconfig: "{{ k3s_kubeconfig }}"
+k3s_datastore_endpoint: "{{ groups['loadbalancers'] | map('extract', hosts) | map(attribute='ip') | map('trim') | map('regex_replace', '^(.*)$', 'https://\\1:2379') | join(',') }}"
+cluster_context: "{{ k3s_cluster_context }}"
+token: "{{ k3s_token }}"
+api_port: "{{ k3s_api_port | default(6443) }}"
+api_endpoint: "{{ keepalived_vip }}"
+extra_server_args: "{{ k3s_extra_server_args }}"
+extra_agent_args: "{{ k3s_extra_agent_args }}"
+extra_service_envs: "{{ k3s_extra_service_envs }}"
+#https://docs.k3s.io/cli/server?_highlight=cluster&_highlight=cidr#networking
+cluster_cidr: "10.42.0.0/16"
+cluster_cidr_ipv6: "2001:db8:42::/56"
+service_cidr: "10.43.0.0/16" 
+service_cidr_ipv6: "2001:db8:43::/112"

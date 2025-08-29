@@ -1,0 +1,18 @@
+127.0.0.1	localhost
+::1		localhost ip6-localhost ip6-loopback
+ff02::1		ip6-allnodes
+ff02::2		ip6-allrouters
+
+127.0.1.1 {{ inventory_hostname_short }}.{{ k3s_dns_domain_name }} {{ inventory_hostname_short }}
+{% for host in groups['loadbalancers'] %}
+{{ hostvars[host]['hosts'][host].ip }} {{ host }}.{{ k3s_dns_domain_name }} {{ host }}
+{{ hostvars[host]['hosts'][host].ipv6 }} {{ host }}.{{ k3s_dns_domain_name }} {{ host }}
+{% endfor %}
+{% for host in groups['servers'] %}
+{{ hostvars[host]['hosts'][host].ip }} {{ host }}.{{ k3s_dns_domain_name }} {{ host }}
+{{ hostvars[host]['hosts'][host].ipv6 }} {{ host }}.{{ k3s_dns_domain_name }} {{ host }}
+{% endfor %}
+{% for host in groups['agents'] %}
+{{ hostvars[host]['hosts'][host].ip }} {{ host }}.{{ k3s_dns_domain_name }} {{ host }}
+{{ hostvars[host]['hosts'][host].ipv6 }} {{ host }}.{{ k3s_dns_domain_name }} {{ host }}
+{% endfor %}

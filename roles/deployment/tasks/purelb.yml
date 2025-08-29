@@ -1,0 +1,63 @@
+---
+- name: Add repo purelb helm
+  ansible.builtin.shell: |
+    helm repo add purelb https://gitlab.com/api/v4/projects/20400619/packages/helm/stable
+
+- name: Update helm repositories
+  ansible.builtin.shell: |
+    helm repo update
+
+- name: Check if purelb helm is installed
+  ansible.builtin.command:
+    cmd: helm list -n purelb
+  register: purelb_helm_installed
+  changed_when: false
+  failed_when: false
+
+- name: Install purelb helm
+  when: purelb_helm_installed.rc != 0
+  ansible.builtin.shell: |
+    helm install --create-namespace --namespace=purelb --set=lbnodeagent.sendgarp=true purelb purelb/purelb
+
+- name: Setup purelb configuration
+  when: purelb_helm_installed.rc == 0
+  block:
+    - name: Apply custom resources for purelb
+      ansible.builtin.shell: |
+        kubectl apply -f - <<EOF
+        ---
+        apiVersion: purelb.io/v1
+        kind: ServiceGroup
+        metadata:
+          name: default
+          namespace: purelb
+        spec:
+          local:
+            v4pools:
+              - aggregation: default
+                pool: {{ k3s_cluster_loadbalancer_pool_ipv4 }}
+                subnet: {{ k3s_cluster_loadbalancer_cidr_ipv4 }}
+        ---
+        apiVersion: crd.projectcalico.org/v1
+        kind: BGPConfiguration
+        metadata:
+          name: default
+        spec:
+          asNumber: 4200000101
+          listenPort: 179
+          logSeverityScreen: Info
+          nodeToNodeMeshEnabled: false
+          prefixAdvertisements:
+            - cidr: {{ k3s_cluster_loadbalancer_cidr_ipv4 }}
+              communities:
+                - purelb
+                - '100:100'
+        ---
+        apiVersion: crd.projectcalico.org/v1
+        kind: IPPool
+        metadata:
+          name: purelb-ipv4
+        spec:
+          cidr: {{ k3s_cluster_loadbalancer_cidr_ipv4 }}
+          disabled: true
+        EOF

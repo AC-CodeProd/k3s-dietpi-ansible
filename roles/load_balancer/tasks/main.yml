@@ -1,0 +1,35 @@
+---
+- name: Install dependent packages
+  apt:
+    name: "{{ packages }}"
+    install_recommends: false
+    update_cache: true
+    cache_valid_time: 3600
+    force_apt_get: true
+    autoclean: true
+    autoremove: true
+  register: apt_install
+  retries: 5
+  until: apt_install is success
+  ignore_errors: "{{ ansible_check_mode }}"
+
+- import_tasks: update_keepalived.yml
+
+- import_tasks: update_haproxy.yml
+
+- name: Ensure ipv4 nonlocal binding is enabled
+  sysctl:
+    name: net.ipv4.ip_nonlocal_bind
+    value: "1"
+    state: present
+    reload: yes
+  notify: restart haproxy
+
+- name: Ensure ipv6 nonlocal binding is enabled
+  sysctl:
+    name: net.ipv6.ip_nonlocal_bind
+    value: "1"
+    state: present
+    reload: yes
+  notify: restart haproxy
+

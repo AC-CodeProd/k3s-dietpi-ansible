@@ -1,0 +1,57 @@
+---
+- name: Cluster information update
+  hosts:
+    - loadbalancer
+    - cluster
+  gather_facts: true
+  become: true
+  tasks:
+    - name: Update hosts file with all cluster nodes
+      ansible.builtin.template:
+        src: templates/hosts.j2
+        dest: /etc/hosts
+        owner: root
+        group: root
+        mode: '0644'
+      tags: update_hosts
+
+    - name: Update haproxy via role task
+      when: inventory_hostname in groups['loadbalancer']
+      ansible.builtin.import_role:
+        name: load_balancer
+        tasks_from: update_haproxy
+    
+    - name: Update keepalived via role task
+      when: inventory_hostname in groups['loadbalancer']
+      ansible.builtin.import_role:
+        name: load_balancer
+        tasks_from: update_keepalived
+
+    - name: Gather cluster node information
+      ansible.builtin.shell: |
+        kubectl get nodes -o wide --no-headers | awk '{print $1, $6}'
+      register: cluster_nodes
+      delegate_to: "{{ groups['servers'][0] }}"
+      run_once: true
+      tags: cluster_info
+
+    - name: Display cluster status
+      ansible.builtin.debug:
+        msg: |
+          Cluster nodes updated:
+          {{ cluster_nodes.stdout_lines | join('\n') }}
+      run_once: true
+      tags: cluster_info
+
+  handlers:
+    - name: Restart haproxy
+      ansible.builtin.systemd:
+        name: haproxy
+        state: restarted
+        enabled: true
+
+    - name: Restart keepalived
+      ansible.builtin.systemd:
+        name: keepalived
+        state: restarted
+        enabled: true

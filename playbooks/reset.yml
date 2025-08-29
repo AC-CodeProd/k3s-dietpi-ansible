@@ -1,0 +1,196 @@
+---
+- name: Clean localhost
+  hosts: localhost
+  tasks:
+    - name: Remove etcd certificates directory
+      ansible.builtin.file:
+        path: files/etcd
+        state: absent
+
+- name: Reset load balancer configuration
+  hosts: loadbalancer
+  become: true
+  tasks:
+    - name: Clean etcd data directory
+      ansible.builtin.shell: rm -rf /var/lib/etcd/*
+    
+    - name: Clean temporary files
+      ansible.builtin.shell: rm -rf /tmp/*
+      
+    - name: Remove etcd systemd service file
+      ansible.builtin.file:
+        path: "{{ systemd_dir }}/etcd.service"
+        state: absent
+
+    - name: Remove pki directory
+      ansible.builtin.file:
+        path: /etc/etcd/pki/
+        state: absent
+
+- name: Reset k3s cluster configuration
+  hosts: cluster
+  become: true
+  tasks:
+    - name: Clean longhorn storage data directory
+      ansible.builtin.shell: rm -rf /var/lib/longhorn/*
+
+    - name: Clean cni binary directory
+      ansible.builtin.shell: rm -rf /opt/cni/bin
+
+    - name: Uninstall k3s server
+      when: "'servers' in group_names"
+      ansible.builtin.command:
+        cmd: k3s-uninstall.sh
+        removes: /var/lib/rancher/k3s/*
+    
+    - name: Uninstall k3s agent
+      when: "'agents' in group_names"
+      ansible.builtin.command:
+        cmd: k3s-agent-uninstall.sh
+        removes: /var/lib/rancher/k3s/*
+    
+    - name: Remove user kubeconfig file
+      ansible.builtin.file:
+        path: ~{{ ansible_user }}/.kube/config
+        state: absent
+    
+    - name: Remove k3s install script
+      ansible.builtin.file:
+        path: /usr/local/bin/k3s-install.sh
+        state: absent
+    
+    - name: Clean k3s server data directory
+      when: k3s_server_location is defined
+      ansible.builtin.shell:
+        cmd: "rm -rf {{ k3s_server_location }}/*"
+        removes: "{{ k3s_server_location }}/*"
+    
+    - name: Remove k3s configuration file
+      when: server_config_yaml is defined
+      ansible.builtin.file:
+        path: /etc/rancher/k3s/config.yaml
+        state: absent
+    
+    - name: Clean temporary files from cluster nodes
+      ansible.builtin.shell: rm -rf /tmp/*
+    
+    - name: Clean cni network configurations
+      ansible.builtin.shell: rm -rf /etc/cni/net.d/*
+    
+    - name: Clean user kube directory
+      ansible.builtin.shell: rm -rf ~/.kube/*
+
+    - name: Clear etc/rancher directory
+      ansible.builtin.shell: rm -rf /etc/rancher/*
+    
+    - name: Remove k3s systemd service file
+      when: server_config_yaml is defined
+      ansible.builtin.file:
+        path: "{{ systemd_dir }}/k3s.service"
+        state: absent
+    
+    - name: Remove k3s systemd environment file
+      when: server_config_yaml is defined
+      ansible.builtin.file:
+        path: "{{ systemd_dir }}/k3s.service.env"
+        state: absent
+        
+    - name: Remove calico calicoctl binary
+      ansible.builtin.file:
+        path: /usr/local/bin/calicoctl
+        state: absent
+
+- name: Reset user configuration
+  hosts: cluster
+  tasks:
+    - name: Remove k3s commands from user bashrc
+      ansible.builtin.lineinfile:
+        path: "~{{ ansible_user }}/.bashrc"
+        search_string: "Added by k3s-dietpi-ansible"
+        state: absent
+
+- name: Reset firewall and network configuration
+  hosts: 
+    - cluster
+    - loadbalancer
+  become: true
+  tasks:
+    - name: Stop nftables services
+      when: (bastion_group | default('loadbalancer')) in group_names
+      ansible.builtin.systemd:
+        name: "{{ item }}"
+        state: stopped
+        enabled: false
+      with_items:
+        - nftables
+      ignore_errors: true
+    
+    - name: Flush nftables rulesets
+      when: (bastion_group | default('loadbalancer')) in group_names
+      ansible.builtin.command: nft flush ruleset
+      changed_when: false
+    
+    - name: Flush iptables nat rules
+      ansible.builtin.command: iptables -t nat -F
+      changed_when: false
+    
+    - name: Flush iptables filter rules
+      ansible.builtin.command: iptables -F
+      changed_when: false
+    
+    - name: Remove persistent iptables rules files
+      ansible.builtin.file:
+        path: "{{ item }}"
+        state: absent
+      loop:
+        - /etc/iptables/rules.v4
+        - /etc/iptables/rules.v6
+    
+    - name: Create minimal nftables configuration
+      when: (bastion_group | default('loadbalancer')) in group_names
+      ansible.builtin.copy:
+        dest: /etc/nftables.conf
+        content: |
+          #!/usr/sbin/nft -f
+          flush ruleset
+        owner: root
+        group: root
+        mode: '0644'
+    
+    - name: Enable nftables service
+      when: (bastion_group | default('loadbalancer')) in group_names
+      ansible.builtin.systemd:
+        name: nftables
+        enabled: true
+
+- name: Reboot cluster
+  hosts: cluster
+  tasks:
+    - name: Reboot and wait for reconnection
+      when: (bastion_group | default('loadbalancer')) not in group_names
+      ansible.builtin.reboot:
+        reboot_command: "reboot"
+        post_reboot_delay: 10
+        reboot_timeout: 60
+    
+    - name: Wait for machine connection after reboot
+      when: (bastion_group | default('loadbalancer')) not in group_names
+      ansible.builtin.wait_for_connection:
+        delay: 20
+        timeout: 120
+
+- name: Reboot load balancer
+  hosts: loadbalancer
+  tasks:
+    - name: Reboot load balancer and wait for reconnection
+      when: (bastion_group | default('loadbalancer')) in group_names
+      ansible.builtin.reboot:
+        reboot_command: "reboot"
+        post_reboot_delay: 10
+        reboot_timeout: 60
+    
+    - name: Wait for load balancer connection after reboot
+      when: (bastion_group | default('loadbalancer')) in group_names
+      ansible.builtin.wait_for_connection:
+        delay: 20
+        timeout: 120

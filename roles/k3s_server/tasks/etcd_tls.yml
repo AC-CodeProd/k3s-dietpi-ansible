@@ -1,0 +1,32 @@
+---
+- name: Setup etcd tls
+  block:
+    - name: Clean old certificates and csrs
+      file:
+        path: /etc/rancher/k3s/etcd
+        state: absent
+      ignore_errors: true
+    
+    - name: Create directory for etcd tls on k3s server
+      file:
+        path: /etc/rancher/k3s/etcd
+        state: directory
+        mode: '0700'
+    
+    - name: Distribute ca cert
+      copy:
+        src: files/etcd/ca.pem
+        dest: /etc/rancher/k3s/etcd/ca.pem
+        mode: '0644'
+    
+    - name: Distribute client cert
+      copy:
+        src: files/etcd/client.pem
+        dest: /etc/rancher/k3s/etcd/client.pem
+        mode: '0644'
+    
+    - name: Distribute client key
+      copy:
+        src: files/etcd/client-key.pem
+        dest: /etc/rancher/k3s/etcd/client-key.pem
+        mode: '0600'

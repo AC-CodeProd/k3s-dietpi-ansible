@@ -1,0 +1,34 @@
+global_defs {
+  enable_script_security
+  script_user root
+}
+
+vrrp_script reload_haproxy {
+    script "/usr/bin/killall -0 haproxy"
+    interval 2
+}
+
+vrrp_instance VI_1 {
+    state {{ hostvars[inventory_hostname].keepalive_role }}
+    lvs_sync_daemon_interface {{ keepalived_interface }}
+    interface {{ keepalived_interface }}
+    virtual_router_id 100
+{% if "MASTER" in hostvars[inventory_hostname].keepalive_role %}
+    priority 200
+{% else %}
+    priority 100
+{% endif %}
+    advert_int 1
+    authentication {
+        auth_type PASS
+        auth_pass {{ keepalived_password }}
+    }
+    virtual_ipaddress {
+        {{ keepalived_vip }}/{{ keepalived_cidr }} brd {{keepalived_broadcast_address}} scope global
+    }
+
+    track_script {
+        reload_haproxy
+    }
+
+}

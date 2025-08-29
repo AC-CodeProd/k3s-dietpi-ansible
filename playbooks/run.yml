@@ -1,0 +1,61 @@
+---
+- name: DietPi nodes preparation
+  hosts: 
+    - loadbalancer
+    - cluster
+  gather_facts: true
+  become: true
+  roles:
+    - role: dietpi
+
+- name: Load balancer and etcd setup
+  hosts:
+    - loadbalancer
+  gather_facts: true
+  become: true
+  roles:
+    - role: load_balancer
+    - role: etcd
+
+- name: K3s server deployment
+  hosts:
+    - servers
+  gather_facts: true
+  become: true
+  roles:
+    - role: k3s_server
+
+- name: K3s agent deployment
+  hosts:
+    - agents
+  gather_facts: true
+  become: true
+  roles:
+    - role: k3s_agent
+
+- name: Kubectl context configuration
+  hosts: localhost
+  tasks:
+    - name: Set kubectl context
+      ansible.builtin.shell: |
+        kubectl config use-context {{ cluster_context }}
+
+- name: DNS configuration
+  hosts:
+    - loadbalancer
+    - cluster
+  tasks:
+    - name: Configure resolv.conf
+      template:
+        src: templates/resolv.conf.j2
+        dest: /etc/resolv.conf
+        owner: root
+        group: root
+        mode: o=rw,g=r,o=r
+
+- name: Helm package manager setup
+  hosts:
+    - cluster
+  gather_facts: true
+  roles:
+    - role: helm

@@ -1,0 +1,35 @@
+---
+systemd_dir: "/etc/systemd/system" 
+
+resolv_nameservers: "{{ (k3s_resolv_nameservers | default('8.8.8.8,9.9.9.9')).split(',') }}"
+
+jumphost_ip: "{{ hostvars[groups['loadbalancers'][0]]['ansible_host'] }}"
+rpi_wired_int: eth0
+rpi_wired_external_int: eth1
+rpi_iface_name: eth0
+
+# Defines IPTABLES rules to define on jumphost
+jumphost_iptables_rules:
+  - chain: POSTROUTING
+    jump: MASQUERADE
+    out_interface: "{{ rpi_wired_external_int}}"
+    source: "{{ rpi_cidr }}"
+    state: absent
+    table: nat
+  - chain: POSTROUTING
+    jump: MASQUERADE
+    out_interface: "{{ rpi_wired_external_int}}"
+    state: present
+    table: nat
+  - chain: FORWARD
+    ctstate: RELATED,ESTABLISHED
+    in_interface: "{{ rpi_wired_external_int}}"
+    jump: ACCEPT
+    out_interface: "{{ rpi_wired_int }}"
+    state: present
+  - chain: FORWARD
+    in_interface: "{{ rpi_wired_int }}"
+    jump: ACCEPT
+    out_interface: "{{ rpi_wired_external_int }}"
+    state: present
+    

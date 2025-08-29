@@ -1,0 +1,323 @@
+---
+- name: Check for existing install script
+  become: false
+  ansible.builtin.stat:
+    path: /usr/local/bin/k3s-install.sh
+  register: install_script
+
+- name: Download artifact only if needed
+  block:
+    - name: Download k3s install script
+      ansible.builtin.get_url:
+        url: https://get.k3s.io/
+        timeout: 120
+        dest: /usr/local/bin/k3s-install.sh
+        owner: root
+        group: root
+        mode: "0755"
+      when: not install_script.stat.exists
+    
+    - name: Run k3s install [server]
+      when: inventory_hostname in groups['servers'] or ansible_host in groups['servers']
+      ansible.builtin.command:
+        cmd: /usr/local/bin/k3s-install.sh
+      environment:
+        INSTALL_K3S_SKIP_ENABLE: "true"
+        # INSTALL_K3S_SKIP_DOWNLOAD: "true"
+        INSTALL_K3S_SKIP_START: "true"
+        INSTALL_K3S_VERSION: "{{ k3s_version }}"
+        INSTALL_K3S_NAME: ""
+        # INSTALL_K3S_EXEC: "serveur --disable=traefik --flannel-backend=host-gw -.-tls-san={{keepalived_vip}} --bind-address={{keepalived_vip}} --advertise-address={{keepalived_vip}} --cluster-init"
+      changed_when: true
+    
+    - name: Add k3s autocomplete to user bashrc
+      when: ansible_user is defined
+      ansible.builtin.lineinfile:
+        path: "~{{ ansible_user }}/.bashrc"
+        regexp: '\.\s+<\(k3s completion bash\)'
+        line: ". <(k3s completion bash)  # Added by k3s-dietpi-ansible"
+
+- name: Setup optional config file
+  when: server_config_yaml is defined
+  block:
+    - name: Make config directory
+      ansible.builtin.file:
+        path: "/etc/rancher/k3s"
+        mode: "0755"
+        state: directory
+    
+    - name: Copy config values
+      ansible.builtin.copy:
+        content: "{{ server_config_yaml }}"
+        dest: "/etc/rancher/k3s/config.yaml"
+        mode: "0644"
+      register: _server_config_result
+
+- import_tasks: etcd_tls.yml
+
+- name: Generate datastore_endpoint dynamically
+  set_fact:
+    k3s_datastore_endpoint: >-
+      {{ groups['loadbalancers']
+          | map('extract', hosts)
+          | map(attribute='ip')
+          | map('trim')
+          | map('regex_replace', '^(.*)$', 'https://\1:2379')
+          | join(',') }}
+
+# - name: Debug datastore endpoint
+#   debug:
+#     var: k3s_datastore_endpoint
+
+- name: Init first server node
+  when: inventory_hostname == groups['servers'][0]
+  block:
+    - name: Copy k3s service file [ha]
+      when:
+        - groups['servers'] | length > 1
+      ansible.builtin.template:
+        src: "k3s-cluster-init.service.j2"
+        dest: "{{ systemd_dir }}/k3s.service"
+        owner: root
+        group: root
+        mode: "0644"
+      register: service_ha
+    
+    - name: Add service environment variables
+      ansible.builtin.lineinfile:
+        path: "{{ systemd_dir }}/k3s.service.env"
+        line: "{{ item }}"
+      loop: "{{ extra_service_envs | default([]) | list }}"
+      when: item | trim != '' and not item | trim | regex_search('^#')
+      loop_control:
+        label: "{{ item }}"
+    
+    - name: Delete any existing token from the environment if different from the new one
+      ansible.builtin.lineinfile:
+        state: absent
+        path: "{{ systemd_dir }}/k3s.service.env"
+        regexp: "^K3S_TOKEN=\\s*(?!{{ token | default('') | regex_escape }}\\s*$)"
+    
+    # Add the token to the environment if it has been provided.
+    # Otherwise, let the first server create one on the first run.
+    - name: Add token as an environment variable
+      no_log: true # avoid logging the server token
+      ansible.builtin.lineinfile:
+        path: "{{ systemd_dir }}/k3s.service.env"
+        line: "K3S_TOKEN={{ token }}"
+      when: token is defined
+    
+    - name: Restart k3s service
+      when:
+        - ansible_facts.services['k3s.service'] is defined
+        - ansible_facts.services['k3s.service'].state == 'running'
+        - service_ha.changed or _server_config_result.changed
+      ansible.builtin.systemd:
+        name: k3s
+        daemon_reload: true
+        state: restarted
+    
+    - name: Enable and check k3s service
+      when: ansible_facts.services['k3s.service'] is not defined or ansible_facts.services['k3s.service'].state != 'running'
+      ansible.builtin.systemd:
+        name: k3s
+        daemon_reload: true
+        state: started
+        enabled: true
+    
+    - name: Pause to allow first server startup
+      when: (groups['servers'] | length) > 1
+      ansible.builtin.pause:
+        seconds: 10
+    
+    - name: Check whether kubectl is installed on control node
+      ansible.builtin.command: 'kubectl'
+      register: kubectl_installed
+      ignore_errors: true
+      delegate_to: 127.0.0.1
+      become: false
+      changed_when: false
+    
+    - name: Copy k3s.yaml to second file
+      ansible.builtin.copy:
+        src: /etc/rancher/k3s/k3s.yaml
+        dest: /etc/rancher/k3s/k3s-copy.yaml
+        mode: "0600"
+        remote_src: true
+      register: copy_k3s_yaml_file
+    
+    - name: Apply k3s k3s_kubeconfig to control node
+      when:
+        - kubectl_installed.rc == 0
+        - copy_k3s_yaml_file.changed
+      block:
+        - name: Copy k3s_kubeconfig to control node
+          ansible.builtin.fetch:
+            src: /etc/rancher/k3s/k3s.yaml
+            dest: "{{ k3s_kubeconfig }}"
+            flat: true
+        
+        - name: Change server address in k3s_kubeconfig on control node
+          ansible.builtin.shell: |
+            KUBECONFIG={{ k3s_kubeconfig }} kubectl config set-cluster default --server=https://{{ api_endpoint }}:{{ api_port }}
+          delegate_to: 127.0.0.1
+          become: false
+          register: csa_result
+          changed_when:
+            - csa_result.rc == 0
+        
+        - name: Setup k3s_kubeconfig
+          when: k3s_kubeconfig == "~/.kube/config.new"
+          ansible.builtin.shell: |
+            mv ~/.kube/config.new ~/.kube/config
+            SERVER=$(kubectl config view --raw -o jsonpath="{.clusters[?(@.name=='default')].cluster.server}")
+            CA_CLUSTER=$(kubectl config view --raw -o jsonpath="{.clusters[?(@.name=='default')].cluster.certificate-authority-data}")
+            
+            USER_KEY=$(kubectl config view --raw -o jsonpath="{.users[?(@.name=='default')].user.client-key-data}")
+            USER_CERT=$(kubectl config view --raw -o jsonpath="{.users[?(@.name=='default')].user.client-certificate-data}")
+
+            kubectl config set clusters.{{ k3s_cluster_name }}.server "$SERVER"
+            kubectl config set clusters.{{ k3s_cluster_name }}.certificate-authority-data "$CA_CLUSTER"
+            kubectl config set contexts.{{ cluster_context }}.cluster {{ k3s_cluster_name }}
+
+            kubectl config set users.{{ k3s_cluster_user }}.client-key-data "$USER_KEY"
+            kubectl config set users.{{ k3s_cluster_user }}.client-certificate-data "$USER_CERT"
+            kubectl config set contexts.{{ cluster_context }}.user {{ k3s_cluster_user }}
+
+            kubectl config delete-cluster default
+            kubectl config delete-user default
+            kubectl config delete-context default
+          delegate_to: 127.0.0.1
+          become: false
+          register: mv_result
+          changed_when:
+            - mv_result.rc == 0
+
+    - name: Get the token if randomly generated
+      when: token is not defined
+      block:
+        - name: Wait for token
+          ansible.builtin.wait_for:
+            path: /var/lib/rancher/k3s/server/token
+        
+        - name: Read node-token from master
+          ansible.builtin.slurp:
+            src: /var/lib/rancher/k3s/server/token
+          register: node_token
+        
+        - name: Store master node-token
+          ansible.builtin.set_fact:
+            token: "{{ node_token.content | b64decode | regex_replace('\n', '') }}"
+
+- name: Start other server if any and verify status
+  when:
+    - (groups['servers'] | length) > 1
+    - inventory_hostname != groups['servers'][0] and ansible_host != groups['servers'][0]
+  block:
+    - name: Get the token from the first server
+      ansible.builtin.set_fact:
+        token: "{{ hostvars[groups['servers'][0]].token }}"
+    
+    - name: Add service environment variables
+      ansible.builtin.lineinfile:
+        path: "{{ systemd_dir }}/k3s.service.env"
+        line: "{{ item }}"
+      loop: "{{ extra_service_envs | default([]) | list }}"
+      when: item | trim != '' and not item | trim | regex_search('^#')
+      loop_control:
+        label: "{{ item }}"
+    
+    - name: Delete any existing token from the environment if different from the new one
+      ansible.builtin.lineinfile:
+        state: absent
+        path: "{{ systemd_dir }}/k3s.service.env"
+        regexp: "^K3S_TOKEN=\\s*(?!{{ token }}\\s*$)"
+    
+    - name: Add the token for joining the cluster to the environment
+      no_log: true # avoid logging the server token
+      ansible.builtin.lineinfile:
+        path: "{{ systemd_dir }}/k3s.service.env"
+        line: "{{ item }}"
+      with_items:
+        - "K3S_TOKEN={{ token }}"
+    
+    - name: Copy k3s service file [ha]
+      ansible.builtin.template:
+        src: "k3s-ha.service.j2"
+        dest: "{{ systemd_dir }}/k3s.service"
+        owner: root
+        group: root
+        mode: "0644"
+      register: service_ha
+    
+    - name: Restart k3s service
+      when:
+        - ansible_facts.services['k3s.service'] is defined
+        - ansible_facts.services['k3s.service'].state == 'running'
+        - service_ha.changed or _server_config_result.changed
+      ansible.builtin.systemd:
+        name: k3s
+        daemon_reload: true
+        state: restarted
+    
+    - name: Enable and check k3s service
+      when: ansible_facts.services['k3s.service'] is not defined or ansible_facts.services['k3s.service'].state != 'running'
+      ansible.builtin.systemd:
+        name: k3s
+        daemon_reload: true
+        state: started
+        enabled: true
+    
+    - name: Verify that all server nodes joined
+      when: not ansible_check_mode and (groups['servers'] | length) > 1
+      ansible.builtin.command:
+        cmd: >
+          k3s kubectl get nodes -l "node-role.kubernetes.io/control-plane=true" -o=jsonpath="{.items[*].metadata.name}"
+      register: nodes
+      until: nodes.rc == 0 and (nodes.stdout.split() | length) == (groups['servers'] | length)
+      retries: 20
+      delay: 10
+      changed_when: false
+
+- name: Setup kubectl for user
+  block:
+    - name: Create directory .kube
+      ansible.builtin.file:
+        path: ~{{ ansible_user }}/.kube
+        state: directory
+        owner: "{{ ansible_user }}"
+        mode: "u=rwx,g=rx,o="
+    
+    - name: Copy config file to user home directory
+      ansible.builtin.copy:
+        src: /etc/rancher/k3s/k3s.yaml
+        dest: ~{{ ansible_user }}/.kube/config
+        remote_src: true
+        owner: "{{ ansible_user }}"
+        mode: "u=rw,g=,o="
+    
+    - name: Configure default kubeconfig for user
+      ansible.builtin.lineinfile:
+        path: ~{{ ansible_user }}/.bashrc
+        regexp: 'export KUBECONFIG=~/.kube/config'
+        line: 'export KUBECONFIG=~/.kube/config # Added by k3s-dietpi-ansible'
+        state: present
+    
+    - name: Configure kubectl autocomplete
+      ansible.builtin.lineinfile:
+        path: ~{{ ansible_user }}/.bashrc
+        regexp: '\.\s+<\(kubectl completion bash\)'
+        line: ". <(kubectl completion bash)  # Added by k3s-dietpi-ansible"
+
+- import_tasks: network_calico.yml
+
+- name: Wait for calico to be ready k3s
+  when: inventory_hostname == groups['servers'][0]
+  ansible.builtin.command:
+    cmd: kubectl wait --for=condition=Ready pods --all -n calico-system --timeout=300s
+  register: calico_wait_result
+  until: calico_wait_result.rc == 0
+  retries: 30
+  delay: 10
+
+- import_tasks: storage.yml

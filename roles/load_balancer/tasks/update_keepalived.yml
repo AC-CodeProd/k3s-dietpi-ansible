@@ -1,0 +1,10 @@
+---
+- name: Generate keepalived config
+  vars:
+    servers: "{{ groups['servers'] }}"
+  template:
+    src: keepalived.conf.j2
+    dest: /etc/keepalived/keepalived.conf
+    mode: 0644
+  notify: restart keepalived
+  tags: update_keepalived

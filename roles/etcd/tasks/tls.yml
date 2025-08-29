@@ -1,0 +1,166 @@
+---
+
+- name: Install openssl if not present
+  apt:
+    name: openssl
+    state: present
+
+- name: Clean old certificates and csrs
+  file:
+    path: "/etc/etcd/pki"
+    state: absent
+  ignore_errors: true
+
+- name: Clean downloaded certs from files/etcd (local)
+  file:
+    path: "files/etcd"
+    state: absent
+  delegate_to: localhost
+  become: false
+  run_once: true
+
+- name: Create certs directory
+  file:
+    path: /etc/etcd/pki
+    state: directory
+    mode: '0755'
+
+- name: Generate openssl config for ca
+  template:
+    src: openssl-ca.cnf.j2
+    dest: /tmp/openssl-ca.cnf
+
+- name: Generate ca private key
+  command: openssl genrsa -out /etc/etcd/pki/ca-key.pem 4096
+  args:
+    creates: /etc/etcd/pki/ca-key.pem
+
+- name: Generate ca certificate with extensions
+  command: >
+    openssl req -x509 -new -nodes -key /etc/etcd/pki/ca-key.pem \
+    -days 3650 -out /etc/etcd/pki/ca.pem \
+    -config /tmp/openssl-ca.cnf -extensions v3_ca
+  args:
+    creates: /etc/etcd/pki/ca.pem
+
+- name: Generate server key
+  command: openssl genrsa -out /etc/etcd/pki/server-key.pem 4096
+  args:
+    creates: /etc/etcd/pki/server-key.pem
+
+- name: Generate openssl config with sans for server
+  template:
+    src: openssl-etcd.cnf.j2
+    dest: /tmp/openssl-etcd.cnf
+
+- name: Generate server csr with sans
+  command: >
+    openssl req -new -key /etc/etcd/pki/server-key.pem \
+    -out /etc/etcd/pki/server.csr \
+    -config /tmp/openssl-etcd.cnf
+  args:
+    creates: /etc/etcd/pki/server.csr
+
+- name: Generate server certificate with sans
+  command: >
+    openssl x509 -req -in /etc/etcd/pki/server.csr \
+    -CA /etc/etcd/pki/ca.pem -CAkey /etc/etcd/pki/ca-key.pem -CAcreateserial \
+    -out /etc/etcd/pki/server.pem -days 365 \
+    -extensions v3_req -extfile /tmp/openssl-etcd.cnf
+  args:
+    creates: /etc/etcd/pki/server.pem
+
+- name: Generate peer key
+  command: openssl genrsa -out /etc/etcd/pki/peer-key.pem 4096
+  args:
+    creates: /etc/etcd/pki/peer-key.pem
+
+- name: Generate openssl config etcd for peer
+  template:
+    src: openssl-etcd-peer.cnf.j2
+    dest: /tmp/openssl-etcd-peer.cnf
+
+# - name: Generate peer CSR
+#   command: >
+#     openssl req -new -key /etc/etcd/pki/peer-key.pem \
+#     -subj "/CN={{ inventory_hostname }}" \
+#     -out /etc/etcd/pki/peer.csr
+#   args:
+#     creates: /etc/etcd/pki/peer.csr
+
+- name: Generate peer csr with sans
+  command: >
+    openssl req -new -key /etc/etcd/pki/peer-key.pem \
+    -out /etc/etcd/pki/peer.csr \
+    -config /tmp/openssl-etcd-peer.cnf
+  args:
+    creates: /etc/etcd/pki/peer.csr
+
+- name: Generate peer certificate
+  command: >
+    openssl x509 -req -in /etc/etcd/pki/peer.csr \
+    -CA /etc/etcd/pki/ca.pem -CAkey /etc/etcd/pki/ca-key.pem -CAcreateserial \
+    -out /etc/etcd/pki/peer.pem -days 365
+  args:
+    creates: /etc/etcd/pki/peer.pem
+
+
+- name: Generate client key
+  command: openssl genrsa -out /etc/etcd/pki/client-key.pem 4096
+  args:
+    creates: /etc/etcd/pki/client-key.pem
+
+- name: Generate client csr
+  command: >
+    openssl req -new -key /etc/etcd/pki/client-key.pem \
+    -subj "/CN=k3s-client" \
+    -out /etc/etcd/pki/client.csr
+  args:
+    creates: /etc/etcd/pki/client.csr
+
+- name: Generate client certificate
+  command: >
+    openssl x509 -req -in /etc/etcd/pki/client.csr \
+    -CA /etc/etcd/pki/ca.pem -CAkey /etc/etcd/pki/ca-key.pem -CAcreateserial \
+    -out /etc/etcd/pki/client.pem -days 365
+  args:
+    creates: /etc/etcd/pki/client.pem
+
+- name: Fetch ca cert from loadbalancer
+  fetch:
+    src: /etc/etcd/pki/ca.pem
+    dest: files/etcd/ca.pem
+    flat: yes
+  run_once: true
+
+- name: Fetch client cert
+  fetch:
+    src: /etc/etcd/pki/client.pem
+    dest: files/etcd/client.pem
+    flat: yes
+  run_once: true
+
+- name: Fetch client key
+  fetch:
+    src: /etc/etcd/pki/client-key.pem
+    dest: files/etcd/client-key.pem
+    flat: yes
+  run_once: true
+
+- name: Compare local vs deployed ca fingerprints
+  command: openssl x509 -noout -fingerprint -in /etc/etcd/pki/ca.pem
+  register: deployed_ca
+
+- name: Compare control machine ca fingerprint
+  delegate_to: localhost
+  become: false
+  command: openssl x509 -noout -fingerprint -in files/etcd/ca.pem
+  register: local_ca
+  run_once: true
+
+- name: Assert that local and deployed ca match
+  assert:
+    that:
+      - deployed_ca.stdout == local_ca.stdout
+    fail_msg: "CA mismatch: the deployed and local CA do not match. You must re-synchronize certificates."
+    success_msg: "CA fingerprint verified: local and deployed CA match."

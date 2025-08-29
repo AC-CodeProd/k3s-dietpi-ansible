@@ -1,0 +1,18 @@
+---
+ansible_ssh_common_args: '-o ProxyCommand="sshpass -p {{ ansible_ssh_pass }} ssh -o StrictHostKeyChecking=no -W %h:%p -q {{ ansible_user }}@{{ jumphost_ip }}"'
+server_config_yaml: |
+  write-kubeconfig-mode: "0644"
+  data-dir: "{{ k3s_server_location }}"
+  cluster-domain: "{{ k3s_dns_domain_name }}"
+  node-ip: "{{ hostvars[inventory_hostname]['hosts'][inventory_hostname].ip }},{{ hostvars[inventory_hostname]['hosts'][inventory_hostname].ipv6 }}"
+  cluster-cidr: "{{ cluster_cidr }},{{ cluster_cidr_ipv6 }}"
+  service-cidr: "{{ service_cidr }},{{ service_cidr_ipv6 }}"
+  cluster-dns: "10.43.0.53,2001:db8:43::53"
+  datastore-endpoint: "{{ k3s_datastore_endpoint }}"
+  datastore-cafile: /etc/rancher/k3s/etcd/ca.pem
+  datastore-certfile: /etc/rancher/k3s/etcd/client.pem
+  datastore-keyfile: /etc/rancher/k3s/etcd/client-key.pem
+  tls-san:
+    - "{{ api_endpoint }}"
+  flannel-backend: "none"
+  disable-network-policy: true
