@@ -25,7 +25,7 @@ Automated deployment of a high-availability K3s cluster on DietPi with IPv4/IPv6
                     ┌─────────────────────┐
                     │   Load Balancer     │
                     │  (keepalived VIP)   │
-                    │    172.18.0.2      │
+                    │    172.18.0.2       │
                     │   HAProxy + etcd    │
                     └─────────┬───────────┘
                               │

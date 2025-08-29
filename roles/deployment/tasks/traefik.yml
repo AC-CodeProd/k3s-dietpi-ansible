@@ -1,30 +1,36 @@
 ---
-- name: Add repo traefik helm
-  ansible.builtin.shell: |
-    helm repo add traefik https://traefik.github.io/charts
-
-- name: Update helm repositories
-  ansible.builtin.shell: |
-    helm repo update
-
-- name: Check if traefik helm is installed
+- name: Check if traefik release exists
   ansible.builtin.command:
-    cmd: helm list -n traefik
-  register: traefik_helm_installed
+    cmd: helm status traefik -n traefik
+  register: traefik_status
   changed_when: false
   failed_when: false
 
-- name: Install traefik helm
-  when: traefik_helm_installed.rc != 0
-  ansible.builtin.shell: |
-    helm install traefik traefik/traefik --wait \
-      --namespace traefik \
-      --create-namespace \
-      --set namespace=traefik \
-      --set ingressRoute.dashboard.enabled=true \
-      --set ingressRoute.dashboard.matchRule='PathPrefix(`/dashboard`) || PathPrefix(`/api`)' \
-      --set ingressRoute.dashboard.entryPoints={traefik} \
-      --set ingressRoute.dashboard.services[0].kind=TraefikService \
-      --set ingressRoute.dashboard.services[0].name=api@internal \
-      --set providers.kubernetesGateway.enabled=true \
-      --set gateway.namespacePolicy=All
+- name: Flag installed
+  ansible.builtin.set_fact:
+    traefik_installed: "{{ traefik_status.rc == 0 }}"
+
+- name: Setup traefik if not installed
+  when: not traefik_installed
+  block:
+    - name: Add repo traefik helm
+      ansible.builtin.shell: |
+        helm repo add traefik https://traefik.github.io/charts
+
+    - name: Update helm repositories
+      ansible.builtin.shell: |
+        helm repo update
+
+    - name: Install traefik helm
+      ansible.builtin.shell: |
+        helm install traefik traefik/traefik --wait \
+          --namespace traefik \
+          --create-namespace \
+          --set namespace=traefik \
+          --set ingressRoute.dashboard.enabled=true \
+          --set ingressRoute.dashboard.matchRule='PathPrefix(`/dashboard`) || PathPrefix(`/api`)' \
+          --set ingressRoute.dashboard.entryPoints={traefik} \
+          --set ingressRoute.dashboard.services[0].kind=TraefikService \
+          --set ingressRoute.dashboard.services[0].name=api@internal \
+          --set providers.kubernetesGateway.enabled=true \
+          --set gateway.namespacePolicy=All
