@@ -1,0 +1,369 @@
+---
+- name: Create namespace for private registry
+  kubernetes.core.k8s:
+    state: present
+    definition:
+      apiVersion: v1
+      kind: Namespace
+      metadata:
+        name: registry
+
+- name: PVC for registry data (Longhorn)
+  kubernetes.core.k8s:
+    state: present
+    definition:
+      apiVersion: v1
+      kind: PersistentVolumeClaim
+      metadata:
+        name: registry-data
+        namespace: registry
+      spec:
+        accessModes: ["ReadWriteOnce"]
+        resources:
+          requests:
+            storage: 80Gi
+        storageClassName: longhorn
+
+- name: Secret for registry auth and secrets
+  kubernetes.core.k8s:
+    state: present
+    definition:
+      apiVersion: v1
+      kind: Secret
+      metadata:
+        name: registry-private-auth
+        namespace: registry
+      type: Opaque
+      stringData:
+        REGISTRY_ADMIN: "{{ docker_registry_admin | string }}"
+        REGISTRY_AUTH: "{{ docker_registry_auth | string }}"
+        REGISTRY_HTTP_SECRET: "{{ docker_registry_http_secret | string }}"
+        REGISTRY_PASSWORD: "{{ docker_registry_password | string }}"
+
+- name: ConfigMap for registry config
+  kubernetes.core.k8s:
+    state: present
+    definition:
+      apiVersion: v1
+      kind: ConfigMap
+      metadata:
+        name: registry
+        namespace: registry
+      data:
+        config.yml: |
+          version: 0.1
+          log:
+            fields:
+              service: registry
+          http:
+            addr: :5000
+            headers:
+              X-Content-Type-Options: [nosniff]
+          auth:
+            htpasswd:
+              realm: registry
+              path: /auth/htpasswd
+          storage:
+            filesystem:
+              rootdirectory: /var/lib/registry
+            delete:
+              enabled: true
+          health:
+            storagedriver:
+              enabled: true
+              interval: 10s
+              threshold: 3
+
+- name: Deployment for private registry
+  kubernetes.core.k8s:
+    state: present
+    definition:
+      apiVersion: apps/v1
+      kind: Deployment
+      metadata:
+        name: registry-private
+        namespace: registry
+        labels:
+          app: registry-private
+      spec:
+        replicas: 1
+        selector:
+          matchLabels:
+            app: registry-private
+        template:
+          metadata:
+            annotations:
+              fix/disable-sa-token: "true-{{ ansible_date_time.iso8601 }}"
+            labels:
+              app: registry-private
+          spec:
+            automountServiceAccountToken: false
+            enableServiceLinks: false
+            volumes:
+              - name: registry-auth
+                secret:
+                  secretName: registry-private-auth
+                  items:
+                    - key: REGISTRY_AUTH
+                      path: htpasswd
+              - name: registry-config
+                configMap:
+                  name: registry
+              - name: registry-private
+                persistentVolumeClaim:
+                  claimName: registry-data
+            containers:
+              - name: registry-private
+                image: registry:{{ docker_registry_version | default('3.0.0') }}
+                imagePullPolicy: IfNotPresent
+                env:
+                  - name: TZ
+                    value: "{{ tz | string }}"
+                  - name: OTEL_TRACES_EXPORTER
+                    value: "none"
+                  - name: REGISTRY_HTTP_SECRET
+                    valueFrom:
+                      secretKeyRef:
+                        name: registry-private-auth
+                        key: REGISTRY_HTTP_SECRET
+                ports:
+                  - containerPort: 5000
+                volumeMounts:
+                  - name: registry-private
+                    mountPath: /var/lib/registry
+                  - name: registry-auth
+                    mountPath: "/auth"
+                    readOnly: true
+                  - name: registry-config
+                    mountPath: "/etc/docker/registry"
+
+- name: Service for registry
+  kubernetes.core.k8s:
+    state: present
+    definition:
+      apiVersion: v1
+      kind: Service
+      metadata:
+        name: registry-private
+        namespace: registry
+        labels:
+          app: registry-private
+      spec:
+        selector:
+          app: registry-private
+        ports:
+          - port: 5000
+            targetPort: 5000
+            protocol: TCP
+        type: ClusterIP
+
+- name: Wait for Deployment to be available
+  kubernetes.core.k8s_info:
+    api_version: apps/v1
+    kind: Deployment
+    name: registry-private
+    namespace: registry
+  register: reg_deploy
+  until: (reg_deploy.resources | length) > 0 and
+         (reg_deploy.resources.0.status.availableReplicas | default(0)) >=
+         (reg_deploy.resources.0.spec.replicas | default(1))
+  retries: 30
+  delay: 5
+
+- name: Secret for registry-ui password
+  kubernetes.core.k8s:
+    state: present
+    definition:
+      apiVersion: v1
+      kind: Secret
+      metadata:
+        name: registry-ui-secret
+        namespace: registry
+      type: Opaque
+      stringData:
+        registry_password: "{{ docker_registry_password | string }}"
+
+- name: ConfigMap for registry-ui
+  kubernetes.core.k8s:
+    state: present
+    definition:
+      apiVersion: v1
+      kind: ConfigMap
+      metadata:
+        name: registry-ui
+        namespace: registry
+      data:
+        config.yml: |
+          # Listen interface.
+          listen_addr: 0.0.0.0:8000
+
+          # Base path of Registry UI.
+          uri_base_path: /
+
+          # Background tasks.
+          performance:
+            # Catalog list page size. It depends from the underlying storage performance.
+            catalog_page_size: 100
+
+            # Catalog (repo list) refresh interval in minutes.
+            # If set to 0 it will never refresh but will run once.
+            catalog_refresh_interval: 10
+
+            # Tags counting refresh interval in minutes.
+            # If set to 0 it will never run. This is fast operation.
+            tags_count_refresh_interval: 60
+
+          # Registry endpoint and authentication.
+          registry:
+            # Registry hostname (without protocol but may include port).
+            hostname: registry-private.registry.svc.{{ k3s_dns_domain_name | string }}:5000
+            # Allow to access non-https enabled registry.
+            insecure: true
+
+            # Registry credentials.
+            # They need to have a full access to the registry.
+            # If token authentication service is enabled, it will be auto-discovered and those credentials
+            # will be used to obtain access tokens.
+            username: "{{ docker_registry_admin | string }}"
+            # password: ""
+            # Set password to '' in order to read it from the file below. Otherwise, it is ignored.
+            password_file: /run/secrets/registry_password_file
+
+            # Alternatively, you can do auth with Keychain, useful for local development.
+            # When enabled the above credentials will not be used.
+            auth_with_keychain: false
+
+          # UI access management.
+          access_control:
+            # Whether users can the event log. Otherwise, only admins listed below.
+            anyone_can_view_events: true
+            # Whether users can delete tags. Otherwise, only admins listed below.
+            anyone_can_delete_tags: false
+            # The list of users to do everything.
+            # User identifier should be set via X-WEBAUTH-USER header from your proxy
+            # because registry UI itself does not employ any auth.
+            admins: []
+
+          # Event listener configuration.
+          event_listener:
+            # The same token should be configured on Docker registry as Authorization Bearer token.
+            bearer_token: xxx
+            # Retention of records to keep.
+            retention_days: 7
+
+            # Event listener storage.
+            database_driver: sqlite3
+            database_location: data/registry_events.db
+            # database_driver: mysql
+            # database_location: user:password@tcp(localhost:3306)/docker_events
+
+            # You can disable event deletion on some hosts when you are running registry UI on MySQL master-master or
+            # cluster setup to avoid deadlocks or replication breaks.
+            deletion_enabled: true
+
+          # Options for tag purging.
+          purge_tags:
+            # How many days to keep tags but also keep the minimal count provided no matter how old.
+            keep_days: 90
+            keep_count: 10
+
+            # Keep tags matching regexp no matter how old, e.g. '^latest$'
+            # Empty string disables this feature.
+            keep_regexp: ''
+
+            # Keep tags listed in the file no matter how old.
+            # File format is JSON: {"repo1": ["tag1", "tag2"], "repoX": ["tagX"]}
+            # Empty string disables this feature.
+            keep_from_file: ''
+
+          # Debug mode.
+          debug:
+            # Affects only templates.
+            templates: false
+
+- name: Deployment for registry-ui
+  kubernetes.core.k8s:
+    state: present
+    definition:
+      apiVersion: apps/v1
+      kind: Deployment
+      metadata:
+        name: registry-ui
+        namespace: registry
+        labels:
+          app: registry-ui
+      spec:
+        replicas: 1
+        selector:
+          matchLabels:
+            app: registry-ui
+        template:
+          metadata:
+            annotations:
+              fix/disable-sa-token: "true-{{ ansible_date_time.iso8601 }}"
+            labels:
+              app: registry-ui
+          spec:
+            automountServiceAccountToken: false
+            securityContext:
+              fsGroup: 2000
+            volumes:
+              - name: registry-ui-config
+                configMap:
+                  name: registry-ui
+              - name: ui-secrets
+                secret:
+                  secretName: registry-ui-secret
+                  defaultMode: 0440
+                  items:
+                    - key: registry_password
+                      path: registry_password_file
+            containers:
+              - name: registry-ui
+                image: quiq/registry-ui:{{ docker_registry_ui_version | default('0.10.4') }}
+                imagePullPolicy: IfNotPresent
+                env:
+                  - name: TZ
+                    value: "{{ tz | string }}"
+                ports:
+                  - containerPort: 8000
+                volumeMounts:
+                  - name: registry-ui-config
+                    mountPath: "/opt/config.yml"
+                    subPath: config.yml
+                  - name: ui-secrets
+                    mountPath: /run/secrets
+                    readOnly: true
+
+- name: Service for registry-ui
+  kubernetes.core.k8s:
+    state: present
+    definition:
+      apiVersion: v1
+      kind: Service
+      metadata:
+        name: registry-ui
+        namespace: registry
+        labels:
+          app: registry-ui
+      spec:
+        selector:
+          app: registry-ui
+        ports:
+          - port: 8000
+            targetPort: 8000
+            protocol: TCP
+        type: ClusterIP
+
+- name: Wait for registry-ui to be available
+  kubernetes.core.k8s_info:
+    api_version: apps/v1
+    kind: Deployment
+    name: registry-ui
+    namespace: registry
+  register: ui_deploy
+  until: (ui_deploy.resources | length) > 0 and
+         (ui_deploy.resources.0.status.availableReplicas | default(0)) >=
+         (ui_deploy.resources.0.spec.replicas | default(1))
+  retries: 30
+  delay: 5

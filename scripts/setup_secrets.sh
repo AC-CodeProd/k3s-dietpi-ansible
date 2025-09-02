@@ -38,3 +38,10 @@ EOF
 [[ -z "${K3S_KUBECONFIG:-'~/.kube/config.new'}" ]] || ansible-vault encrypt_string --name k3s_kubeconfig "${K3S_KUBECONFIG:-'~/.kube/config.new'}" >> "group_vars/all/vault"
 [[ -z "${K3S_RESOLV_NAMESERVERS:-'8.8.8.8,9.9.9.9'}" ]] || ansible-vault encrypt_string --name k3s_resolv_nameservers "${K3S_RESOLV_NAMESERVERS:-'8.8.8.8,9.9.9.9'}" >> "group_vars/all/vault"
 [[ -z "$LONGHORN_BACKUP_TARGET" ]] || ansible-vault encrypt_string --name longhorn_backup_target "$LONGHORN_BACKUP_TARGET" >> "group_vars/all/vault"
+
+[[ -z "$DOCKER_REGISTRY_ADMIN" ]] || ansible-vault encrypt_string --name docker_registry_admin "$DOCKER_REGISTRY_ADMIN" >> "group_vars/all/vault"
+[[ -z "$DOCKER_REGISTRY_PASSWORD" ]] || ansible-vault encrypt_string --name docker_registry_password "$DOCKER_REGISTRY_PASSWORD" >> "group_vars/all/vault"
+[[ -z "$DOCKER_REGISTRY_AUTH" ]] || ansible-vault encrypt_string --name docker_registry_auth "$DOCKER_REGISTRY_AUTH" >> "group_vars/all/vault"
+[[ -z "$DOCKER_REGISTRY_HTTP_SECRET" ]] || ansible-vault encrypt_string --name docker_registry_http_secret "$DOCKER_REGISTRY_HTTP_SECRET" >> "group_vars/all/vault"
+[[ -z "$DOCKER_REGISTRY_VERSION" ]] || ansible-vault encrypt_string --name docker_registry_version "$DOCKER_REGISTRY_VERSION" >> "group_vars/all/vault"
+[[ -z "$DOCKER_REGISTRY_UI_VERSION" ]] || ansible-vault encrypt_string --name docker_registry_ui_version "$DOCKER_REGISTRY_UI_VERSION" >> "group_vars/all/vault"

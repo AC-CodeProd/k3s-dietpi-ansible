@@ -3,10 +3,11 @@
 [![Ansible](https://img.shields.io/badge/Ansible-EE0000?style=flat&logo=ansible&logoColor=white)](https://www.ansible.com/)
 [![K3s](https://img.shields.io/badge/K3s-326CE5?style=flat&logo=kubernetes&logoColor=white)](https://k3s.io/)
 [![DietPi](https://img.shields.io/badge/DietPi-FF6B35?style=flat&logo=raspberrypi&logoColor=white)](https://dietpi.com/)
+[![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](https://opensource.org/licenses/MIT)
 
 🇬🇧 **English version** | [🇫🇷 Version française](README_FR.md)
 
-Automated deployment of a high-availability K3s cluster on DietPi with IPv4/IPv6 dual-stack support, external load balancer and dedicated etcd.
+Automated deployment of a high-availability K3s cluster on DietPi with IPv4/IPv6 dual-stack support, external load balancer, dedicated etcd, and integrated storage solution with Longhorn.
 
 ## 📋 Table of Contents
 
@@ -31,7 +32,7 @@ Automated deployment of a high-availability K3s cluster on DietPi with IPv4/IPv6
                               │
               ┌───────────────┼───────────────┐
               │               │               │
-    ┌─────────▼─────────┐ ┌───▼────┐ ┌───────▼─────────┐
+    ┌─────────▼─────────┐ ┌───▼────┐ ┌────────▼────────┐
     │   K3s Server 1    │ │Server 2│ │   K3s Server 3  │
     │  172.18.0.42      │ │.43     │ │  172.18.0.44    │
     │   (Control Plane) │ │        │ │                 │
@@ -56,7 +57,8 @@ Automated deployment of a high-availability K3s cluster on DietPi with IPv4/IPv6
 - **K3s Agents**: 2+ worker nodes for workloads
 - **Dual-stack Network**: Native IPv4/IPv6 support
 - **PureLB**: Integrated load balancer for LoadBalancer services
-- **Traefik**: Ingress controller (optional)
+- **Traefik**: Ingress controller (default)
+- **Longhorn**: Distributed block storage for persistent volumes
 
 ## 🔧 Prerequisites
 
@@ -133,7 +135,7 @@ ansible-playbook playbooks/run.yml
 
 | Variable | Description | Default |
 |----------|-------------|---------|
-| `k3s_version` | K3s version | `v1.28.x` |
+| `k3s_version` | K3s version | `v1.31.x+k3s1` |
 | `keepalived_vip` | Load balancer VIP | `172.18.0.2` |
 | `cluster_cidr` | Pod CIDR | `10.42.0.0/16` |
 | `service_cidr` | Service CIDR | `10.43.0.0/16` |
@@ -156,7 +158,7 @@ export ANSIBLE_USER="your-user"
 export ANSIBLE_PASSWORD="password"
 
 # K3s Configuration
-export K3S_VERSION="v1.28.8+k3s1"
+export K3S_VERSION="v1.31.2+k3s1"
 export K3S_TOKEN="$(openssl rand -base64 64)"
 export K3S_API_PORT="6443"
 
@@ -301,6 +303,7 @@ k3s-dietpi-ansible/
 ├── requirements.yml        # Required Ansible collections
 ├── playbooks/
 │   ├── run.yml            # Main deployment
+│   ├── deployment.yml     # Additional components deployment
 │   ├── upgrade.yml        # Upgrade
 │   ├── reset.yml          # Reset
 │   ├── sync.yml           # Cluster synchronization
@@ -311,6 +314,8 @@ k3s-dietpi-ansible/
 │   ├── etcd/               # etcd database
 │   ├── k3s_server/         # K3s servers
 │   ├── k3s_agent/          # K3s agents
+│   ├── k3s_upgrade/        # K3s upgrade procedures
+│   ├── deployment/         # Additional components
 │   └── helm/               # Package manager
 ├── group_vars/
 │   ├── all/                # Global variables
@@ -329,7 +334,72 @@ k3s-dietpi-ansible/
 - **Automatic SSH hardening**
 - **Private network** isolated for the cluster
 
-## 🚀 Advanced Features
+## � Scripts and Utilities
+
+### Available Scripts
+
+The project includes several utility scripts in the `scripts/` directory:
+
+```bash
+# Setup secrets and vault configuration
+./scripts/setup_secrets.sh
+```
+
+### Configuration Management
+
+```bash
+# View current configuration (encrypted)
+ansible-vault view group_vars/all/vault
+
+# Edit encrypted configuration
+ansible-vault edit group_vars/all/vault
+
+# Decrypt configuration for debugging
+ansible-vault decrypt group_vars/all/vault --output=-
+```
+
+## �🚀 Advanced Features
+
+### Longhorn Distributed Storage
+
+The cluster comes with Longhorn v1.9.1 pre-installed as distributed block storage:
+
+```bash
+# Check Longhorn status
+kubectl get pods -n longhorn-system
+
+# Create a persistent volume claim
+kubectl apply -f - <<EOF
+apiVersion: v1
+kind: PersistentVolumeClaim
+metadata:
+  name: test-pvc
+spec:
+  accessModes:
+    - ReadWriteOnce
+  resources:
+    requests:
+      storage: 10Gi
+  storageClassName: longhorn
+EOF
+
+# Check PVC status
+kubectl get pvc
+```
+
+### Additional Components Deployment
+
+The `deployment.yml` playbook includes additional components:
+
+```bash
+# Deploy additional components (PureLB, Traefik, Registry)
+ansible-playbook playbooks/deployment.yml -i inventory.yml
+
+# Deploy specific components only
+ansible-playbook playbooks/deployment.yml --tags purelb -i inventory.yml
+ansible-playbook playbooks/deployment.yml --tags traefik -i inventory.yml
+ansible-playbook playbooks/deployment.yml --tags registry -i inventory.yml
+```
 
 ### IPv6 dual-stack support
 
@@ -487,7 +557,11 @@ This project is licensed under the MIT License. See the `LICENSE` file for detai
 - **Monitoring**: Built-in observability stack
 - **Networking**: Dual-stack IPv4/IPv6 support
 - **Automation**: 100% Infrastructure as Code
+- **Storage**: Distributed block storage with Longhorn
+- **Load Balancing**: Integrated PureLB for LoadBalancer services
 
 ---
 
 ⭐ **Please star this project if it helps you!**
+
+*Last updated: September 2, 2024*
