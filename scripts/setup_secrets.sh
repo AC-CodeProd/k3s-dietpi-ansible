@@ -45,3 +45,5 @@ EOF
 [[ -z "$DOCKER_REGISTRY_HTTP_SECRET" ]] || ansible-vault encrypt_string --name docker_registry_http_secret "$DOCKER_REGISTRY_HTTP_SECRET" >> "group_vars/all/vault"
 [[ -z "$DOCKER_REGISTRY_VERSION" ]] || ansible-vault encrypt_string --name docker_registry_version "$DOCKER_REGISTRY_VERSION" >> "group_vars/all/vault"
 [[ -z "$DOCKER_REGISTRY_UI_VERSION" ]] || ansible-vault encrypt_string --name docker_registry_ui_version "$DOCKER_REGISTRY_UI_VERSION" >> "group_vars/all/vault"
+
+[[ -z "$TRAEFIK_DASHBOARD_HTPASSWD_BCRYPT" ]] || ansible-vault encrypt_string --name traefik_dashboard_htpasswd_bcrypt "$TRAEFIK_DASHBOARD_HTPASSWD_BCRYPT" >> "group_vars/all/vault"

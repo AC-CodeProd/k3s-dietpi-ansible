@@ -15,3 +15,5 @@
 inventory.yml
 playbooks/test.yml
 !LICENSE
+playbooks/deployment-private.yml
+roles/deployment-private
