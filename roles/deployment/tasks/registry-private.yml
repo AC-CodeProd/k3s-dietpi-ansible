@@ -238,7 +238,7 @@
             # Whether users can the event log. Otherwise, only admins listed below.
             anyone_can_view_events: true
             # Whether users can delete tags. Otherwise, only admins listed below.
-            anyone_can_delete_tags: false
+            anyone_can_delete_tags: true
             # The list of users to do everything.
             # User identifier should be set via X-WEBAUTH-USER header from your proxy
             # because registry UI itself does not employ any auth.
