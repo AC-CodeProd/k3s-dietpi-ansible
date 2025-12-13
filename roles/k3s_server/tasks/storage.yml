@@ -2,7 +2,7 @@
 
 - name: Download longhorn manifest
   get_url: 
-    url: "https://raw.githubusercontent.com/longhorn/longhorn/v1.9.1/deploy/longhorn.yaml"
+    url: "https://raw.githubusercontent.com/longhorn/longhorn/v1.10.1/deploy/longhorn.yaml"
     dest: /tmp/longhorn.yaml
   when: inventory_hostname == groups['servers'][0]
 
