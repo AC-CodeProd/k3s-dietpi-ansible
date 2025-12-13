@@ -175,8 +175,11 @@ export KEEPALIVED_PASSWORD="mot-de-passe-keepalived"
 # Déploiement complet
 ansible-playbook playbooks/run.yml -i inventory.yml
 
-# Mise à jour du cluster
-ansible-playbook playbooks/upgrade.yml -i inventory.yml
+# Mise à jour du cluster k3s
+ansible-playbook playbooks/upgrade.yml -i inventory.yml --tags k3s
+
+# Mise à jour du cluster storage
+ansible-playbook playbooks/upgrade.yml -i inventory.yml --tags storage
 
 # Réinitialisation complète
 ansible-playbook playbooks/reset.yml -i inventory.yml

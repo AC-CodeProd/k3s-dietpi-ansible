@@ -175,8 +175,11 @@ export KEEPALIVED_PASSWORD="keepalived-password"
 # Full deployment
 ansible-playbook playbooks/run.yml -i inventory.yml
 
-# Cluster upgrade
-ansible-playbook playbooks/upgrade.yml -i inventory.yml
+# Cluster upgrade k3s
+ansible-playbook playbooks/upgrade.yml -i inventory.yml --tags k3s
+
+# Cluster upgrade storage
+ansible-playbook playbooks/upgrade.yml -i inventory.yml --tags storage
 
 # Complete reset
 ansible-playbook playbooks/reset.yml -i inventory.yml
