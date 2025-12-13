@@ -3,6 +3,7 @@
   hosts: servers
   become: true
   serial: 1
+  tags: k3s
   roles:
     - role: k3s_upgrade
 
@@ -10,5 +11,60 @@
   hosts: agents
   become: true
   serial: 1
+  tags: k3s
   roles:
     - role: k3s_upgrade
+
+- name: Upgrade longhorn storage
+  hosts: servers
+  become: true
+  tags: storage
+  tasks:
+    - name: Download longhorn manifest
+      get_url: 
+        url: "https://raw.githubusercontent.com/longhorn/longhorn/v1.10.1/deploy/longhorn.yaml"
+        dest: /tmp/longhorn.yaml
+      when: inventory_hostname == groups['servers'][0]
+
+    - name: Configure longhorn default settings
+      when: inventory_hostname == groups['servers'][0]
+      ansible.builtin.shell: |
+        FILE="{{ path }}"
+        SEARCH="{{ item.after }}"
+        KEY="{{ item.key }}"
+        VALUE="{{ item.value }}"
+        CHECK_VALUE="{{ item.value | lower }}"
+
+        if [[ "$CHECK_VALUE" =~ ^[0-9]+$ || "$CHECK_VALUE" =~ ^[0-9]+\.[0-9]+$ ]]; then
+          TMP_VALUE="$VALUE"
+        elif [[ "$CHECK_VALUE" == "true" || "$CHECK_VALUE" == "false" ]]; then
+          TMP_VALUE="$CHECK_VALUE"
+        else
+          TMP_VALUE="\"$VALUE\""
+        fi
+
+        SEARCH_ESCAPED=$(printf '%s\n' "$SEARCH" | sed 's/[\/&]/\\&/g')
+        VALUE_ESCAPED=$(printf '%s\n' "$TMP_VALUE" | sed 's/[\/&]/\\&/g')
+
+        INDENT=$(grep -F "$SEARCH" "$FILE" | sed -E 's/[^ ].*//')
+
+        if ! grep -qE "^[ ]*${KEY}:" "$FILE"; then
+          sed -i "/$SEARCH_ESCAPED/a\\
+        ${INDENT}  ${KEY}: ${VALUE_ESCAPED}" "$FILE"
+        fi
+      args:
+        executable: /bin/bash
+      loop:
+        - key: "backup-target"
+          value: "{{longhorn_backup_target}}"
+          after: "default-resource.yaml: |-"
+        - key: "default-data-path"
+          value: "/var/lib/longhorn"
+          after: "default-setting.yaml: |-"
+      vars:
+        path: "/tmp/longhorn.yaml"
+
+    - name: Deploy longhorn storage
+      when: inventory_hostname == groups['servers'][0]
+      command:
+        cmd: kubectl apply -f /tmp/longhorn.yaml
