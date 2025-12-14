@@ -7,3 +7,4 @@ packages:
   - apparmor
   - apparmor-utils
   - vim
+  - nfs-common
