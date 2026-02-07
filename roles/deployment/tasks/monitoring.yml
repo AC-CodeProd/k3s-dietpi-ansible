@@ -1,0 +1,105 @@
+---
+- name: Install kube-prometheus-stack via Helm repo
+  become: true
+  vars:
+    repo_name: prometheus-community
+    repo_url: "https://prometheus-community.github.io/helm-charts"
+  tags:
+    - monitoring
+  block:
+
+    - name: Check if prometheus-community repo is already configured
+      ansible.builtin.command:
+        argv: ["helm", "repo", "list"]
+      register: helm_repo_list
+      changed_when: false
+
+    - name: Add prometheus-community repo if missing
+      ansible.builtin.command:
+        argv: ["helm", "repo", "add", "{{ repo_name }}", "{{ repo_url }}"]
+      when: repo_name not in (helm_repo_list.stdout | default(''))
+      register: helm_repo_add
+      changed_when: helm_repo_add.rc == 0
+
+    - name: Update prometheus-community repo index
+      ansible.builtin.command:
+        argv: ["helm", "repo", "update", "{{ repo_name }}"]
+      register: helm_repo_update
+      changed_when: helm_repo_update.rc == 0
+
+    - name: Verify the pinned chart version is visible in local index
+      ansible.builtin.command:
+        argv: ["helm", "search", "repo", "{{ repo_name }}/kube-prometheus-stack", "--versions"]
+      register: helm_search_versions
+      changed_when: false
+      failed_when: "'81.5.0' not in (helm_search_versions.stdout | default(''))"
+
+    - name: Install/upgrade kube-prometheus-stack
+      ansible.builtin.command:
+        argv:
+          - helm
+          - upgrade
+          - --install
+          - prometheus-operator
+          - "{{ repo_name }}/kube-prometheus-stack"
+          - --version
+          - "81.5.0"
+          - --namespace
+          - monitoring
+          - --create-namespace
+          - --set
+          - grafana.enabled=true
+          - --set-string
+          - "grafana.persistence.size={{ kube_prometheus_stack_grafana_persistence_size | default('15Gi') }}"
+          - --set-string
+          - "grafana.adminPassword={{ kube_prometheus_stack_grafana_admin_password | default('anafarg') }}"
+          - --set-string
+          - "grafana.defaultDashboardsTimezone={{ kube_prometheus_stack_grafana_timezone | default('Europe/Paris') }}"
+          - --set-string
+          - "grafana.persistence.storageClassName={{ kube_prometheus_stack_grafana_storage_classname | default('longhorn') }}"
+          - --set-string
+          - "prometheus.prometheusSpec.retention={{ kube_prometheus_stack_prometheus_retention | default('7d') }}"
+          - --set-string
+          - "prometheus.prometheusSpec.retentionSize={{ kube_prometheus_stack_prometheus_retention_size | default('20GB') }}"
+          - --set-string
+          - "prometheus.prometheusSpec.storageSpec.volumeClaimTemplate.spec.resources.requests.storage={{ kube_prometheus_stack_prometheus_storage | default('40Gi') }}"
+          - --set-string
+          - "prometheus.prometheusSpec.storageSpec.volumeClaimTemplate.spec.storageClassName={{ kube_prometheus_stack_prometheus_storage_classname | default('longhorn') }}"
+      register: helm_upgrade
+      changed_when: helm_upgrade.rc == 0
+
+    - name: IngressRoute for prometheus
+      delegate_to: localhost
+      become: false
+      kubernetes.core.k8s:
+        state: present
+        definition:
+          apiVersion: traefik.io/v1alpha1
+          kind: IngressRoute
+          metadata: { name: prometheus, namespace: "monitoring" }
+          spec:
+            entryPoints: [ web ]
+            routes:
+              - match:  "Host(`prometheus.{{ k3s_dns_domain_name }}`)"
+                kind: Rule
+                services:
+                  - name: prometheus-operated
+                    port: 9090
+                    
+    - name: IngressRoute for grafana
+      delegate_to: localhost
+      become: false
+      kubernetes.core.k8s:
+        state: present
+        definition:
+          apiVersion: traefik.io/v1alpha1
+          kind: IngressRoute
+          metadata: { name: grafana, namespace: "monitoring" }
+          spec:
+            entryPoints: [ web ]
+            routes:
+              - match:  "Host(`grafana.{{ k3s_dns_domain_name }}`)"
+                kind: Rule
+                services:
+                  - name: prometheus-operator-grafana
+                    port: 80

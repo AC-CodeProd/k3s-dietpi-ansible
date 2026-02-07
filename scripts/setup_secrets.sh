@@ -47,3 +47,5 @@ EOF
 [[ -z "$DOCKER_REGISTRY_UI_VERSION" ]] || ansible-vault encrypt_string --name docker_registry_ui_version "$DOCKER_REGISTRY_UI_VERSION" >> "group_vars/all/vault"
 
 [[ -z "$TRAEFIK_DASHBOARD_HTPASSWD_BCRYPT" ]] || ansible-vault encrypt_string --name traefik_dashboard_htpasswd_bcrypt "$TRAEFIK_DASHBOARD_HTPASSWD_BCRYPT" >> "group_vars/all/vault"
+
+[[ -z "${KUBE_PROMETHEUS_STACK_GRAFANA_ADMIN_PASSWORD:-'anafarg'}" ]] || ansible-vault encrypt_string --name kube_prometheus_stack_grafana_admin_password "${KUBE_PROMETHEUS_STACK_GRAFANA_ADMIN_PASSWORD:-'anafarg'}" >> "group_vars/all/vault"

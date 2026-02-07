@@ -19,3 +19,6 @@
       delegate_to: localhost
       become: false
       tags: registry-private
+
+    - import_tasks: monitoring.yml
+      tags: monitoring
