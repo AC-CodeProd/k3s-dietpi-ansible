@@ -7,7 +7,7 @@ server_config_yaml: |
   node-ip: "{{ hostvars[inventory_hostname]['hosts'][inventory_hostname].ip }},{{ hostvars[inventory_hostname]['hosts'][inventory_hostname].ipv6 }}"
   cluster-cidr: "{{ cluster_cidr }},{{ cluster_cidr_ipv6 }}"
   service-cidr: "{{ service_cidr }},{{ service_cidr_ipv6 }}"
-  cluster-dns: "10.43.0.53,2001:db8:43::53"
+  cluster-dns: "10.43.0.53,fd42:f3f5:fe50:43::53"
   datastore-endpoint: "{{ k3s_datastore_endpoint }}"
   datastore-cafile: /etc/rancher/k3s/etcd/ca.pem
   datastore-certfile: /etc/rancher/k3s/etcd/client.pem

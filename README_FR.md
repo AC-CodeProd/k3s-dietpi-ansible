@@ -410,9 +410,9 @@ Le cluster est configuré nativement en dual-stack IPv4/IPv6 :
 
 ```yml
 cluster_cidr: "10.42.0.0/16"
-cluster_cidr_ipv6: "2001:db8:42::/56"
+cluster_cidr_ipv6: "fd42:f3f5:fe50:42::/56"
 service_cidr: "10.43.0.0/16"
-service_cidr_ipv6: "2001:db8:43::/112"
+service_cidr_ipv6: "fd42:f3f5:fe50:43::/112"
 ```
 
 ### Évolutivité
