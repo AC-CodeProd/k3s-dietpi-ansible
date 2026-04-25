@@ -45,7 +45,7 @@
     marker: "# {mark} ANSIBLE MANAGED IPv6 for {{ rpi_iface_name }}"
     block: |
       iface {{ rpi_iface_name }} inet6 static
-          address {{ hostvars[inventory_hostname]['hosts'][inventory_hostname].ipv6 }}
+          address {{ target_hosts[inventory_hostname].ipv6 }}
           netmask {{ rpi_ipv6_netmask }}
           gateway {{ rpi_ipv6_gateway }}
 

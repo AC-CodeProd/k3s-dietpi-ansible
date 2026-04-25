@@ -26,7 +26,6 @@
         helm install traefik traefik/traefik --wait \
           --namespace traefik \
           --create-namespace \
-          --set namespace=traefik \
           --set ingressRoute.dashboard.enabled=true \
           --set ingressRoute.dashboard.matchRule='PathPrefix(`/dashboard`) || PathPrefix(`/api`)' \
           --set ingressRoute.dashboard.entryPoints={traefik} \
@@ -80,7 +79,7 @@
           spec:
             entryPoints: [ web ]
             routes:
-              - match:  "Host(`traefik.{{ k3s_dns_domain_name }}`) && (PathPrefix(`/dashboard`) || PathPrefix(`/api`))"
+              - match:  "Host(`traefik.{{ cluster_domain }}`) && (PathPrefix(`/dashboard`) || PathPrefix(`/api`))"
                 kind: Rule
                 middlewares:
                   - name: dashboard-auth

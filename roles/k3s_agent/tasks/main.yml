@@ -43,6 +43,20 @@
         mode: "0644"
       register: _agent_config_result
 
+    - name: Configure Docker Hub credentials to avoid rate limiting
+      when:
+        - dockerhub_username is defined
+        - dockerhub_password is defined
+      ansible.builtin.copy:
+        dest: "/etc/rancher/k3s/registries.yaml"
+        mode: "0600"
+        content: |
+          configs:
+            "docker.io":
+              auth:
+                username: {{ dockerhub_username }}
+                password: {{ dockerhub_password }}
+
 - name: Get the token from the first server
   ansible.builtin.set_fact:
     token: "{{ hostvars[groups['servers'][0]].token }}"

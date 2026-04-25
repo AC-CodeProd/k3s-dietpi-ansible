@@ -5,7 +5,10 @@
   failed_when: false
   changed_when: false
 
-- import_tasks: network.yml
+- name: Run network configuration tasks
+  tags: network
+  block:
+    - import_tasks: network.yml
 
 - import_tasks: unlock_apt.yml
   when: unlock_apt | default(false)

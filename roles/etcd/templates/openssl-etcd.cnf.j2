@@ -13,5 +13,5 @@ subjectAltName = @alt_names
 
 [alt_names]
 {% for host in groups['loadbalancers'] %}
-IP.{{ loop.index }} = {{ hosts[host].ip }}
+IP.{{ loop.index }} = {{ target_hosts[host].ip }}
 {% endfor %}

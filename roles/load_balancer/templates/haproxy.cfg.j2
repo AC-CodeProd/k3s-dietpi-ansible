@@ -42,7 +42,7 @@ backend k3s-backend
     balance roundrobin
     default-server inter 10s downinter 5s rise 2 fall 2 slowstart 60s maxconn 250 maxqueue 256 weight 100
 {% for host in servers %}
-    server {{ hostvars[host]['ansible_hostname'] }} {{ hostvars[host]['hosts'][host].ip }}:6443 check
+    server {{ hostvars[host]['ansible_hostname'] }} {{ target_hosts[host].ip }}:6443 check
 {% endfor %}
 
 frontend stats

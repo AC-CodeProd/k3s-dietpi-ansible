@@ -38,6 +38,7 @@ EOF
 [[ -z "${K3S_KUBECONFIG:-'~/.kube/config.new'}" ]] || ansible-vault encrypt_string --name k3s_kubeconfig "${K3S_KUBECONFIG:-'~/.kube/config.new'}" >> "group_vars/all/vault"
 [[ -z "${K3S_RESOLV_NAMESERVERS:-'8.8.8.8,9.9.9.9'}" ]] || ansible-vault encrypt_string --name k3s_resolv_nameservers "${K3S_RESOLV_NAMESERVERS:-'8.8.8.8,9.9.9.9'}" >> "group_vars/all/vault"
 [[ -z "$LONGHORN_BACKUP_TARGET" ]] || ansible-vault encrypt_string --name longhorn_backup_target "$LONGHORN_BACKUP_TARGET" >> "group_vars/all/vault"
+[[ -z "$LONGHORN_VERSION" ]] || ansible-vault encrypt_string --name longhorn_version "$LONGHORN_VERSION" >> "group_vars/all/vault"
 
 [[ -z "$DOCKER_REGISTRY_ADMIN" ]] || ansible-vault encrypt_string --name docker_registry_admin "$DOCKER_REGISTRY_ADMIN" >> "group_vars/all/vault"
 [[ -z "$DOCKER_REGISTRY_PASSWORD" ]] || ansible-vault encrypt_string --name docker_registry_password "$DOCKER_REGISTRY_PASSWORD" >> "group_vars/all/vault"
@@ -49,3 +50,8 @@ EOF
 [[ -z "$TRAEFIK_DASHBOARD_HTPASSWD_BCRYPT" ]] || ansible-vault encrypt_string --name traefik_dashboard_htpasswd_bcrypt "$TRAEFIK_DASHBOARD_HTPASSWD_BCRYPT" >> "group_vars/all/vault"
 
 [[ -z "${KUBE_PROMETHEUS_STACK_GRAFANA_ADMIN_PASSWORD:-'anafarg'}" ]] || ansible-vault encrypt_string --name kube_prometheus_stack_grafana_admin_password "${KUBE_PROMETHEUS_STACK_GRAFANA_ADMIN_PASSWORD:-'anafarg'}" >> "group_vars/all/vault"
+
+[[ -z "$DOCKERHUB_USERNAME" ]] || ansible-vault encrypt_string --name dockerhub_username "$DOCKERHUB_USERNAME" >> "group_vars/all/vault"
+[[ -z "$DOCKERHUB_PASSWORD" ]] || ansible-vault encrypt_string --name dockerhub_password "$DOCKERHUB_PASSWORD" >> "group_vars/all/vault"
+
+[[ -z "$CALICO_VERSION" ]] || ansible-vault encrypt_string --name calico_version "$CALICO_VERSION" >> "group_vars/all/vault"

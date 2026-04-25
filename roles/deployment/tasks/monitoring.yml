@@ -32,7 +32,7 @@
         argv: ["helm", "search", "repo", "{{ repo_name }}/kube-prometheus-stack", "--versions"]
       register: helm_search_versions
       changed_when: false
-      failed_when: "'81.5.0' not in (helm_search_versions.stdout | default(''))"
+      failed_when: "'84.5.0' not in (helm_search_versions.stdout | default(''))"
 
     - name: Install/upgrade kube-prometheus-stack
       ansible.builtin.command:
@@ -43,7 +43,7 @@
           - prometheus-operator
           - "{{ repo_name }}/kube-prometheus-stack"
           - --version
-          - "81.5.0"
+          - "v84.5.0"
           - --namespace
           - monitoring
           - --create-namespace
@@ -80,7 +80,7 @@
           spec:
             entryPoints: [ web ]
             routes:
-              - match:  "Host(`prometheus.{{ k3s_dns_domain_name }}`)"
+              - match:  "Host(`prometheus.{{ cluster_domain }}`)"
                 kind: Rule
                 services:
                   - name: prometheus-operated
@@ -98,7 +98,7 @@
           spec:
             entryPoints: [ web ]
             routes:
-              - match:  "Host(`grafana.{{ k3s_dns_domain_name }}`)"
+              - match:  "Host(`grafana.{{ cluster_domain }}`)"
                 kind: Rule
                 services:
                   - name: prometheus-operator-grafana

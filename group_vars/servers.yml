@@ -3,11 +3,11 @@ ansible_ssh_common_args: '-o ProxyCommand="sshpass -p {{ ansible_ssh_pass }} ssh
 server_config_yaml: |
   write-kubeconfig-mode: "0644"
   data-dir: "{{ k3s_server_location }}"
-  cluster-domain: "{{ k3s_dns_domain_name }}"
-  node-ip: "{{ hostvars[inventory_hostname]['hosts'][inventory_hostname].ip }},{{ hostvars[inventory_hostname]['hosts'][inventory_hostname].ipv6 }}"
+  cluster-domain: "{{ cluster_domain }}"
+  node-ip: "{{ target_hosts[inventory_hostname].ip }},{{ target_hosts[inventory_hostname].ipv6 }}"
   cluster-cidr: "{{ cluster_cidr }},{{ cluster_cidr_ipv6 }}"
   service-cidr: "{{ service_cidr }},{{ service_cidr_ipv6 }}"
-  cluster-dns: "10.43.0.53,fd42:f3f5:fe50:43::53"
+  cluster-dns: "{{ cluster_dns }}"
   datastore-endpoint: "{{ k3s_datastore_endpoint }}"
   datastore-cafile: /etc/rancher/k3s/etcd/ca.pem
   datastore-certfile: /etc/rancher/k3s/etcd/client.pem

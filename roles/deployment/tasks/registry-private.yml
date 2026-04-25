@@ -216,7 +216,7 @@
           # Registry endpoint and authentication.
           registry:
             # Registry hostname (without protocol but may include port).
-            hostname: registry-private.registry.svc.{{ k3s_dns_domain_name | string }}:5000
+            hostname: registry-private.registry.svc.{{ cluster_domain | string }}:5000
             # Allow to access non-https enabled registry.
             insecure: true
 

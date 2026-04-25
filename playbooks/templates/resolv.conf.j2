@@ -1,5 +1,5 @@
 {{ ansible_managed|comment }}
-search {{ k3s_dns_domain_name }}
+search {{ cluster_domain }}
 {% for ns in resolv_nameservers %}
 nameserver {{ ns }}
 {% endfor %}

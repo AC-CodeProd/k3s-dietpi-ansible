@@ -22,7 +22,7 @@
   tasks:
     - name: Download longhorn manifest
       get_url: 
-        url: "https://raw.githubusercontent.com/longhorn/longhorn/v1.10.1/deploy/longhorn.yaml"
+        url: "https://raw.githubusercontent.com/longhorn/longhorn/{{ longhorn_version }}/deploy/longhorn.yaml"
         dest: /tmp/longhorn.yaml
       when: inventory_hostname == groups['servers'][0]
 
@@ -68,3 +68,72 @@
       when: inventory_hostname == groups['servers'][0]
       command:
         cmd: kubectl apply -f /tmp/longhorn.yaml
+
+- name: Upgrade calico network
+  hosts: servers
+  become: true
+  tags: calico
+  tasks:
+    - name: Apply operator-crds
+      when: inventory_hostname == groups['servers'][0]
+      command:
+        cmd: kubectl apply --server-side --force-conflicts -f https://raw.githubusercontent.com/projectcalico/calico/{{ calico_version }}/manifests/operator-crds.yaml
+
+    - name: Apply tigera-operator
+      when: inventory_hostname == groups['servers'][0]
+      command:
+        cmd: kubectl apply -f https://raw.githubusercontent.com/projectcalico/calico/{{ calico_version }}/manifests/tigera-operator.yaml
+
+    - name: Generate calico custom resources
+      when: inventory_hostname == groups['servers'][0]
+      ansible.builtin.copy:
+        dest: /tmp/calico-custom-resources.yaml
+        content: |
+          apiVersion: operator.tigera.io/v1
+          kind: Installation
+          metadata:
+            name: default
+          spec:
+            calicoNetwork:
+              containerIPForwarding: Enabled
+              ipPools:
+              - name: default-ipv6-ippool
+                blockSize: 122
+                cidr: {{ cluster_cidr_ipv6 }}
+                encapsulation: None
+                natOutgoing: Enabled
+                nodeSelector: all()
+              - name: default-ipv4-ippool
+                blockSize: 26
+                cidr: {{ cluster_cidr }}
+                encapsulation: VXLANCrossSubnet
+                natOutgoing: Enabled
+                nodeSelector: all()
+          ---
+          apiVersion: operator.tigera.io/v1
+          kind: APIServer
+          metadata:
+            name: default
+          spec: {}
+
+    - name: Apply calico custom resources
+      when: inventory_hostname == groups['servers'][0]
+      command:
+        cmd: kubectl apply -f /tmp/calico-custom-resources.yaml
+
+    - name: Upgrade calicoctl binary
+      ansible.builtin.get_url:
+        url: https://github.com/projectcalico/calico/releases/download/{{ calico_version }}/calicoctl-linux-arm64
+        dest: /usr/local/bin/calicoctl
+        mode: '0755'
+        force: true
+      become: true
+
+    - name: Wait for calico to be ready after upgrade
+      when: inventory_hostname == groups['servers'][0]
+      ansible.builtin.command:
+        cmd: kubectl wait --for=condition=Ready pods --all -n calico-system --timeout=300s
+      register: calico_wait_result
+      until: calico_wait_result.rc == 0
+      retries: 30
+      delay: 10

@@ -5,15 +5,15 @@
   block:
     - name: Apply operator-crds
       command:
-        cmd: kubectl create -f https://raw.githubusercontent.com/projectcalico/calico/v3.30.2/manifests/operator-crds.yaml
+        cmd: kubectl create -f https://raw.githubusercontent.com/projectcalico/calico/{{ calico_version }}/manifests/operator-crds.yaml
     
     - name: Apply tigera-operator
       command:
-        cmd: kubectl create -f https://raw.githubusercontent.com/projectcalico/calico/v3.30.2/manifests/tigera-operator.yaml
+        cmd: kubectl create -f https://raw.githubusercontent.com/projectcalico/calico/{{ calico_version }}/manifests/tigera-operator.yaml
     
     - name: Download calico custom resources
       get_url: 
-        url: "https://raw.githubusercontent.com/projectcalico/calico/v3.30.2/manifests/custom-resources.yaml"
+        url: "https://raw.githubusercontent.com/projectcalico/calico/{{ calico_version }}/manifests/custom-resources.yaml"
         dest: /tmp/calico-custom-resources.yaml
     
     - name: Insert containerIPForwarding calico custom resources
@@ -70,7 +70,7 @@
         
 - name: Download calicoctl binary
   ansible.builtin.get_url:
-    url: https://github.com/projectcalico/calico/releases/download/v3.30.2/calicoctl-linux-arm64
+    url: https://github.com/projectcalico/calico/releases/download/{{ calico_version }}/calicoctl-linux-arm64
     dest: /usr/local/bin/calicoctl
     mode: '0755'
     force: true

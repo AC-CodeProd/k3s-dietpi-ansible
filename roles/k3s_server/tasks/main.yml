@@ -53,13 +53,27 @@
         mode: "0644"
       register: _server_config_result
 
+    - name: Configure Docker Hub credentials to avoid rate limiting
+      when:
+        - dockerhub_username is defined
+        - dockerhub_password is defined
+      ansible.builtin.copy:
+        dest: "/etc/rancher/k3s/registries.yaml"
+        mode: "0600"
+        content: |
+          configs:
+            "docker.io":
+              auth:
+                username: {{ dockerhub_username }}
+                password: {{ dockerhub_password }}
+
 - import_tasks: etcd_tls.yml
 
 - name: Generate datastore_endpoint dynamically
   set_fact:
     k3s_datastore_endpoint: >-
       {{ groups['loadbalancers']
-          | map('extract', hosts)
+          | map('extract', target_hosts)
           | map(attribute='ip')
           | map('trim')
           | map('regex_replace', '^(.*)$', 'https://\1:2379')
